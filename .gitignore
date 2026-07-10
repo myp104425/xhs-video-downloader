@@ -1,0 +1,29 @@
+# Flutter
+.dart_tool/
+.packages
+build/
+flutter_*.png
+*.iml
+.metadata
+
+# Android
+local.properties
+*.keystore
+key.properties
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Windows
+*.log
+*.pyc
