@@ -74,7 +74,7 @@ class DownloadService {
     try {
       final downloadDir = await getDownloadDirectory();
       final fileName =
-          '${_sanitizeFileName(videoInfo.title)}_${noteId}.mp4';
+          '${_sanitizeFileName(videoInfo.title)}_$noteId.mp4';
       final filePath = '${downloadDir.path}/$fileName';
       final file = File(filePath);
 
@@ -154,7 +154,7 @@ class DownloadService {
       final downloadedFile = File(filePath);
       if (await downloadedFile.exists()) {
         final fileSize = await downloadedFile.length();
-        developer.log('下载完成: $filePath (${fileSize} bytes)', name: _tag);
+        developer.log('下载完成: $filePath ($fileSize bytes)', name: _tag);
 
         videoInfo.downloadStatus = DownloadStatus.completed;
         videoInfo.localPath = filePath;

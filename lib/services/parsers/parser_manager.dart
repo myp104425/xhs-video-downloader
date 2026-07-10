@@ -1,4 +1,5 @@
 import 'dart:developer' as developer;
+import '../../models/video_info.dart';
 import 'parser_base.dart';
 import 'xiaohongshu_parser.dart';
 import 'douyin_parser.dart';

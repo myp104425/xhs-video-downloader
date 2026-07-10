@@ -319,8 +319,8 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
-          child: const Icon(
-            Icons.video_download_outlined,
+          child: Icon(
+            Icons.download_for_offline_outlined,
             size: 36,
             color: Colors.white,
           ),

@@ -72,6 +72,7 @@ class WeiboParser extends VideoParser {
       return VideoInfo(
         noteId: DateTime.now().millisecondsSinceEpoch.toString(),
         title: titleMatch?.group(1)?.replaceAll('\\u002F', '/') ?? '微博视频',
+        author: '',
         coverUrl: coverMatch?.group(1)?.replaceAll('\\u002F', '/') ?? '',
         videoUrl: videoUrlMatch.group(1)!.replaceAll('\\u002F', '/'),
         sourceUrl: url,
@@ -85,7 +86,7 @@ class WeiboParser extends VideoParser {
   Future<String> _resolveRedirect(String url) async {
     try {
       final response = await http
-          .head(Uri.parse(url), headers: commonHeaders())
+          .head(Uri.parse(url), headers: VideoParser.commonHeaders())
           .timeout(_timeout);
       return response.request?.url.toString() ?? url;
     } catch (_) {
@@ -95,7 +96,7 @@ class WeiboParser extends VideoParser {
 
   Future<String> _fetchPage(String url, {String? cookie}) async {
     final response = await http
-        .get(Uri.parse(url), headers: commonHeaders(cookie: cookie))
+        .get(Uri.parse(url), headers: VideoParser.commonHeaders(cookie: cookie))
         .timeout(_timeout);
     if (response.statusCode == 200) return response.body;
     throw Exception('微博页面请求失败: HTTP ${response.statusCode}');
@@ -136,17 +137,17 @@ class WeiboParser extends VideoParser {
 
       search(data);
 
-      if (videoUrl == null || videoUrl.isEmpty) return null;
+      if (videoUrl == null || videoUrl!.isEmpty) return null;
       if (noteId == null) {
         noteId = DateTime.now().millisecondsSinceEpoch.toString();
       }
 
       return VideoInfo(
-        noteId: noteId,
+        noteId: noteId!,
         title: title!,
         author: author ?? '',
         coverUrl: coverUrl ?? '',
-        videoUrl: videoUrl,
+        videoUrl: videoUrl!,
         sourceUrl: sourceUrl,
         platform: VideoPlatform.weibo,
       );

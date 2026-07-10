@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/video_info.dart';
-import '../services/download_service.dart';
 import 'platform_badge.dart';
 
 /// 视频信息卡片组件

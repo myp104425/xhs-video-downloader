@@ -50,7 +50,7 @@ class BilibiliParser extends VideoParser {
     // B站有官方 API（无需 cookie 即可获取视频信息）
     final apiUrl = 'https://api.bilibili.com/x/web-interface/view?bvid=$bvId';
     final response = await http
-        .get(Uri.parse(apiUrl), headers: commonHeaders(referer: 'https://www.bilibili.com'))
+        .get(Uri.parse(apiUrl), headers: VideoParser.commonHeaders(referer: 'https://www.bilibili.com'))
         .timeout(_timeout);
 
     if (response.statusCode != 200) {
@@ -73,16 +73,15 @@ class BilibiliParser extends VideoParser {
     final description = videoData['desc']?.toString() ?? '';
     final stat = videoData['stat'] as Map? ?? {};
     final likes = stat['like'] as int? ?? 0;
-    final aid = (videoData['aid'] as int?)?.toString() ?? '';
 
     // 尝试获取视频播放地址（需要 cookie 和 referer）
-    String? videoUrl = '';
+    String videoUrl = '';
     try {
       final playUrl =
           'https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=${videoData['cid']}&qn=112&fnval=0&fnver=0&fourk=1';
       final playResponse = await http
           .get(Uri.parse(playUrl),
-              headers: commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'))
+              headers: VideoParser.commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'))
           .timeout(_timeout);
 
       if (playResponse.statusCode == 200) {
@@ -117,7 +116,7 @@ class BilibiliParser extends VideoParser {
   Future<String> _resolveRedirect(String url) async {
     try {
       final response = await http
-          .head(Uri.parse(url), headers: commonHeaders())
+          .head(Uri.parse(url), headers: VideoParser.commonHeaders())
           .timeout(_timeout);
       return response.request?.url.toString() ?? url;
     } catch (_) {

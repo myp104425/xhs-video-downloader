@@ -41,7 +41,7 @@ class XiaohongshuParser extends VideoParser {
     }
 
     final noteId = _extractNoteId(url);
-    if (noteId == null || noteId.isEmpty) {
+    if (noteId == null || noteId!.isEmpty) {
       throw Exception('无法从小红书链接中提取笔记ID');
     }
 
@@ -60,7 +60,7 @@ class XiaohongshuParser extends VideoParser {
   Future<String> _resolveShortUrl(String shortUrl) async {
     try {
       final response = await http
-          .get(Uri.parse(shortUrl), headers: commonHeaders())
+          .get(Uri.parse(shortUrl), headers: VideoParser.commonHeaders())
           .timeout(_timeout);
       return response.request?.url.toString() ?? shortUrl;
     } catch (e) {
@@ -77,7 +77,7 @@ class XiaohongshuParser extends VideoParser {
   /// 获取页面 HTML（桌面端 UA）
   Future<String> _fetchPage(String url, {String? cookie}) async {
     final response = await http
-        .get(Uri.parse(url), headers: commonHeaders(cookie: cookie))
+        .get(Uri.parse(url), headers: VideoParser.commonHeaders(cookie: cookie))
         .timeout(_timeout);
 
     if (response.statusCode == 200) return response.body;
@@ -166,7 +166,7 @@ class XiaohongshuParser extends VideoParser {
       }
 
       videoUrl ??= noteCard['video_url']?.toString();
-      if (videoUrl == null || videoUrl.isEmpty) return null;
+      if (videoUrl == null || videoUrl!.isEmpty) return null;
 
       return VideoInfo(
         noteId: noteId,
@@ -276,6 +276,7 @@ class XiaohongshuParser extends VideoParser {
       return VideoInfo(
         noteId: noteId,
         title: title ?? '',
+        author: '',
         coverUrl: coverUrl ?? '',
         videoUrl: videoUrl,
         sourceUrl: sourceUrl,
@@ -313,6 +314,7 @@ class XiaohongshuParser extends VideoParser {
       return VideoInfo(
         noteId: noteId,
         title: title ?? '',
+        author: '',
         coverUrl: coverUrl ?? '',
         videoUrl: videoUrl,
         sourceUrl: sourceUrl,

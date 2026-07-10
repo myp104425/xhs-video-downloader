@@ -54,7 +54,7 @@ class DouyinParser extends VideoParser {
   Future<String> _resolveRedirect(String url) async {
     try {
       final response = await http
-          .head(Uri.parse(url), headers: commonHeaders())
+          .head(Uri.parse(url), headers: VideoParser.commonHeaders())
           .timeout(_timeout);
       return response.request?.url.toString() ?? url;
     } catch (_) {
@@ -64,7 +64,7 @@ class DouyinParser extends VideoParser {
 
   Future<String> _fetchPage(String url, {String? cookie}) async {
     final response = await http
-        .get(Uri.parse(url), headers: commonHeaders(cookie: cookie))
+        .get(Uri.parse(url), headers: VideoParser.commonHeaders(cookie: cookie))
         .timeout(_timeout);
     if (response.statusCode == 200) return response.body;
     throw Exception('抖音页面请求失败: HTTP ${response.statusCode}');
@@ -114,17 +114,18 @@ class DouyinParser extends VideoParser {
           r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>',
           dotAll: true,
           caseSensitive: false);
-      final ldMatch = ldPattern.firstMatch(html);
 
       // 方法3: 正则提取 video_id 然后构造 API
       final vidPattern =
-          RegExp(r'video_id["\']?\s*[:=]\s*["\']([a-zA-Z0-9_-]+)["\']');
+          RegExp(r'''video_id["']?\s*[:=]\s*["']([a-zA-Z0-9_-]+)["']''');
       final vidMatch = vidPattern.firstMatch(html);
       if (vidMatch != null) {
         final videoId = vidMatch.group(1)!;
         return VideoInfo(
           noteId: videoId,
           title: '抖音视频',
+          author: '',
+          coverUrl: '',
           videoUrl: 'https://www.douyin.com/video/$videoId',
           sourceUrl: sourceUrl,
           platform: VideoPlatform.douyin,
@@ -189,7 +190,7 @@ class DouyinParser extends VideoParser {
       if (noteId == null) noteId = DateTime.now().millisecondsSinceEpoch.toString();
 
       return VideoInfo(
-        noteId: noteId,
+        noteId: noteId!,
         title: title ?? '抖音视频',
         author: author ?? '',
         coverUrl: coverUrl ?? '',

@@ -43,7 +43,7 @@ class KuaishouParser extends VideoParser {
 
   Future<String> _fetchPage(String url, {String? cookie}) async {
     final response = await http
-        .get(Uri.parse(url), headers: commonHeaders(cookie: cookie))
+        .get(Uri.parse(url), headers: VideoParser.commonHeaders(cookie: cookie))
         .timeout(_timeout);
     if (response.statusCode == 200) return response.body;
     throw Exception('快手页面请求失败: HTTP ${response.statusCode}');
@@ -83,6 +83,7 @@ class KuaishouParser extends VideoParser {
         return VideoInfo(
           noteId: photoMatch?.group(1) ?? '',
           title: titleMatch?.group(1)?.replaceAll('\\u002F', '/') ?? '快手视频',
+          author: '',
           coverUrl: coverMatch?.group(1) ?? '',
           videoUrl: urlMatch?.group(1)?.replaceAll('\\u002F', '/') ?? '',
           sourceUrl: sourceUrl,
@@ -133,15 +134,15 @@ class KuaishouParser extends VideoParser {
 
       search(data);
 
-      if (videoUrl == null || videoUrl.isEmpty) return null;
+      if (videoUrl == null || videoUrl!.isEmpty) return null;
       if (noteId == null) noteId = DateTime.now().millisecondsSinceEpoch.toString();
 
       return VideoInfo(
-        noteId: noteId,
+        noteId: noteId!,
         title: title!,
         author: author ?? '',
         coverUrl: coverUrl ?? '',
-        videoUrl: videoUrl,
+        videoUrl: videoUrl!,
         sourceUrl: sourceUrl,
         platform: VideoPlatform.kuaishou,
       );

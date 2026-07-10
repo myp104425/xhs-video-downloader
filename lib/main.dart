@@ -40,7 +40,7 @@ class VideoDownloaderApp extends StatelessWidget {
           backgroundColor: Colors.transparent,
         ),
 
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -90,7 +90,7 @@ class VideoDownloaderApp extends StatelessWidget {
           backgroundColor: Colors.transparent,
         ),
 
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
