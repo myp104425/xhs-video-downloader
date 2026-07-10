@@ -107,7 +107,7 @@ class DownloadService {
     Directory downloadDir,
     String safeName,
   ) async {
-    final filePath = '${downloadDir.path}/$safeName.mp4';
+    final filePath = '${downloadDir.path}/${safeName}_${videoInfo.noteId}.mp4';
     final file = File(filePath);
 
     if (await file.exists() && await file.length() > 0) {
@@ -177,8 +177,8 @@ class DownloadService {
     Directory downloadDir,
     String safeName,
   ) async {
-    final tempVideoPath = '${downloadDir.path}/${safeName}_temp.mp4';
-    final mp3Path = '${downloadDir.path}/$safeName.mp3';
+    final tempVideoPath = '${downloadDir.path}/${safeName}_${videoInfo.noteId}_temp.mp4';
+    final mp3Path = '${downloadDir.path}/${safeName}_${videoInfo.noteId}.mp3';
 
     // 如果 MP3 已存在，直接返回
     final mp3File = File(mp3Path);
