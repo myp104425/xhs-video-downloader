@@ -271,7 +271,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               '• 默认路径为应用内部存储目录\n'
                               '• 自定义目录可设置为 Download 文件夹\n'
                               '• 视频保存为 .mp4 格式\n'
-                              '• 音频保存为 .mp3 格式（192kbps）',
+                              '• 音频保存为 .mp3 格式',
                               style: TextStyle(
                                 fontSize: 13,
                                 height: 1.6,

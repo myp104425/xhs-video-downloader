@@ -210,18 +210,9 @@ class _HomeScreenState extends State<HomeScreen>
     _downloadSubscription = stream.listen(
       (progress) {
         if (!mounted) return;
-        String stageText;
-        switch (progress.stage) {
-          case DownloadStage.downloading:
-            stageText = '${progress.formattedReceived} / ${progress.formattedTotal} · ${progress.formattedSpeed}';
-            break;
-          case DownloadStage.converting:
-            stageText = '正在转换为 MP3...';
-            break;
-          case DownloadStage.done:
-            stageText = '处理完成';
-            break;
-        }
+        final stageText = progress.stage == DownloadStage.converting
+            ? '正在处理...'
+            : '${progress.formattedReceived} / ${progress.formattedTotal} · ${progress.formattedSpeed}';
         setState(() {
           _downloadProgress = progress.percentage;
           _downloadStatusText = stageText;
