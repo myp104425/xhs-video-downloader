@@ -41,7 +41,7 @@ class XiaohongshuParser extends VideoParser {
     }
 
     final noteId = _extractNoteId(url);
-    if (noteId == null || noteId!.isEmpty) {
+    if (noteId == null || noteId.isEmpty) {
       throw Exception('无法从小红书链接中提取笔记ID');
     }
 
@@ -166,7 +166,7 @@ class XiaohongshuParser extends VideoParser {
       }
 
       videoUrl ??= noteCard['video_url']?.toString();
-      if (videoUrl == null || videoUrl!.isEmpty) return null;
+      if (videoUrl == null || videoUrl.isEmpty) return null;
 
       return VideoInfo(
         noteId: noteId,
