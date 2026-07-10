@@ -316,7 +316,7 @@ class XiaohongshuParser extends VideoParser {
         title: title ?? '',
         author: '',
         coverUrl: coverUrl ?? '',
-        videoUrl: videoUrl!,
+        videoUrl: videoUrl,
         sourceUrl: sourceUrl,
         platform: VideoPlatform.xiaohongshu,
       );
