@@ -109,11 +109,7 @@ class DouyinParser extends VideoParser {
         return _extractVideoInfo(data, sourceUrl);
       }
 
-      // 方法2: 从页面 JSON-LD 提取
-      final ldPattern = RegExp(
-          r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>',
-          dotAll: true,
-          caseSensitive: false);
+      // 方法2: 从页面 JSON-LD 提取（已集成到方法1中）
 
       // 方法3: 正则提取 video_id 然后构造 API
       final vidPattern =
@@ -187,7 +183,7 @@ class DouyinParser extends VideoParser {
 
       search(data);
 
-      if (noteId == null) noteId = DateTime.now().millisecondsSinceEpoch.toString();
+      noteId ??= DateTime.now().millisecondsSinceEpoch.toString();
 
       return VideoInfo(
         noteId: noteId!,

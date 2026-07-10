@@ -135,7 +135,7 @@ class KuaishouParser extends VideoParser {
       search(data);
 
       if (videoUrl == null || videoUrl!.isEmpty) return null;
-      if (noteId == null) noteId = DateTime.now().millisecondsSinceEpoch.toString();
+      noteId ??= DateTime.now().millisecondsSinceEpoch.toString();
 
       return VideoInfo(
         noteId: noteId!,
