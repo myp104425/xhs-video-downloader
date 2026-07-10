@@ -192,16 +192,25 @@ enum DownloadStatus {
   failed,
 }
 
+/// 下载阶段
+enum DownloadStage {
+  downloading,
+  converting,
+  done,
+}
+
 /// 下载进度的回调
 class DownloadProgress {
   final int received;
   final int total;
   final double speed; // bytes per second
+  final DownloadStage stage;
 
   DownloadProgress({
     required this.received,
     required this.total,
     this.speed = 0,
+    this.stage = DownloadStage.downloading,
   });
 
   double get percentage => total > 0 ? received / total : 0.0;

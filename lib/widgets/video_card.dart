@@ -6,6 +6,7 @@ import 'platform_badge.dart';
 class VideoCard extends StatelessWidget {
   final VideoInfo videoInfo;
   final VoidCallback? onDownload;
+  final VoidCallback? onDownloadMp3;
   final VoidCallback? onOpen;
   final VoidCallback? onDelete;
 
@@ -13,6 +14,7 @@ class VideoCard extends StatelessWidget {
     super.key,
     required this.videoInfo,
     this.onDownload,
+    this.onDownloadMp3,
     this.onOpen,
     this.onDelete,
   });
@@ -164,59 +166,76 @@ class VideoCard extends StatelessWidget {
                 // 操作按钮
                 Row(
                   children: [
-                    if (isCompleted && onOpen != null)
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: onOpen,
-                          icon: const Icon(Icons.play_arrow_rounded,
-                              size: 20),
-                          label: const Text('播放'),
-                          style: OutlinedButton.styleFrom(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            side: BorderSide(
-                              color: theme.colorScheme.primary
-                                  .withOpacity(0.2),
+                    if (!isCompleted) ...[
+                      if (onDownload != null)
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: onDownload,
+                            icon: const Icon(Icons.download_rounded, size: 20),
+                            label: const Text('下载视频'),
+                            style: FilledButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              backgroundColor: videoInfo.platform.brandColor,
                             ),
                           ),
                         ),
-                      ),
-                    if (isCompleted && onOpen != null && onDelete != null)
-                      const SizedBox(width: 10),
-                    if (!isCompleted && onDownload != null)
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: onDownload,
-                          icon: const Icon(Icons.download_rounded,
-                              size: 20),
-                          label: const Text('下载视频'),
-                          style: FilledButton.styleFrom(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                      if (onDownloadMp3 != null) ...[
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: onDownloadMp3,
+                            icon: const Icon(Icons.audio_file_rounded, size: 20),
+                            label: const Text('下载 MP3'),
+                            style: OutlinedButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              side: BorderSide(
+                                color: theme.colorScheme.primary.withOpacity(0.2),
+                              ),
                             ),
-                            backgroundColor:
-                                videoInfo.platform.brandColor,
                           ),
                         ),
-                      ),
-                    if (isCompleted && onDelete != null)
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: theme.colorScheme.error.withOpacity(0.2),
+                      ],
+                    ] else ...[
+                      if (onOpen != null)
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: onOpen,
+                            icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                            label: const Text('播放'),
+                            style: OutlinedButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              side: BorderSide(
+                                color: theme.colorScheme.primary.withOpacity(0.2),
+                              ),
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(12),
                         ),
-                        child: IconButton(
-                          onPressed: onDelete,
-                          icon: Icon(
-                            Icons.delete_outline_rounded,
-                            color: theme.colorScheme.error,
+                      if (onOpen != null && onDelete != null)
+                        const SizedBox(width: 10),
+                      if (onDelete != null)
+                        Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: theme.colorScheme.error.withOpacity(0.2),
+                            ),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          tooltip: '删除',
+                          child: IconButton(
+                            onPressed: onDelete,
+                            icon: Icon(
+                              Icons.delete_outline_rounded,
+                              color: theme.colorScheme.error,
+                            ),
+                            tooltip: '删除',
+                          ),
                         ),
-                      ),
+                    ],
                   ],
                 ),
               ],

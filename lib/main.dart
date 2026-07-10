@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/home_screen.dart';
 import 'screens/download_screen.dart';
+import 'screens/settings_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -104,6 +105,7 @@ class VideoDownloaderApp extends StatelessWidget {
       routes: {
         '/': (context) => const HomeScreen(),
         '/downloads': (context) => const DownloadScreen(),
+        '/settings': (context) => const SettingsScreen(),
       },
     );
   }
