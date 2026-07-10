@@ -212,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen>
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text(
-          '视频解析下载',
+          '六月妈妈视频解析',
           style: TextStyle(fontWeight: FontWeight.w600),
         ),
         actions: [
@@ -335,7 +335,7 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         const SizedBox(height: 6),
         Text(
-          '粘贴链接 · 一键解析 · 无水印下载',
+          '专门给明琛翊妈妈做的小工具——by明琛翊爸爸',
           style: TextStyle(
             color: theme.colorScheme.onSurface.withOpacity(0.4),
             fontSize: 14,

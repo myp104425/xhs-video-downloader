@@ -24,7 +24,7 @@ class VideoDownloaderApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '视频解析下载',
+      title: '六月妈妈视频解析',
       debugShowCheckedModeBanner: false,
 
       theme: ThemeData(
