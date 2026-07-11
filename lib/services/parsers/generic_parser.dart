@@ -46,7 +46,7 @@ class GenericParser extends VideoParser {
         title: _extractFileName(url),
         author: '',
         coverUrl: '',
-        videoUrl: detectedUrl,
+        videoUrl: url,
         sourceUrl: url,
         platform: VideoPlatform.unknown,
       );
