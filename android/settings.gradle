@@ -12,8 +12,6 @@ pluginManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://maven.arthenica.com' }
-        maven { url 'https://jitpack.io' }
         gradlePluginPortal()
     }
 }
