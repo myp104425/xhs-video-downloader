@@ -70,12 +70,12 @@ class BilibiliParser extends VideoParser {
     final cidStr = cid?.toString() ?? '';
     if (cidStr.isEmpty) throw Exception('无法获取视频 cid');
 
-    // 获取视频播放地址 — fnval=0 返回 flv 格式（绝对 URL，最可靠）
+    // 获取视频播放地址 — Python 脚本方案：fnval=4048 DASH + durl 兜底
     String videoUrl = '';
     try {
-      // fnval=0: flv 格式，无需 DASH 拆包
+      // 先用 DASH (fnval=4048) — Python 脚本方案
       final playResp = await http.get(
-        Uri.parse('https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=80&fnval=0&fnver=0&fourk=1'),
+        Uri.parse('https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=0&fnval=4048&fnver=0&fourk=1'),
         headers: VideoParser.commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'),
       ).timeout(_timeout);
 
@@ -83,11 +83,30 @@ class BilibiliParser extends VideoParser {
         final playData = jsonDecode(playResp.body) as Map<String, dynamic>;
         if (playData['code'] == 0) {
           final data = playData['data'] as Map?;
-          if (data != null && data['durl'] is List) {
-            final durl = data['durl'] as List;
-            if (durl.isNotEmpty) {
-              var url = (durl.first as Map)['url']?.toString() ?? '';
-              if (url.isNotEmpty) videoUrl = url;
+          if (data != null) {
+            // 方式1: DASH 视频流 (Python 脚本方案，取最高码率)
+            if (data['dash'] is Map) {
+              final dash = data['dash'] as Map;
+              final videos = dash['video'] as List?;
+              if (videos != null && videos.isNotEmpty) {
+                // 按带宽排序取最高画质
+                videos.sort((a, b) => ((b as Map)['bandwidth'] ?? 0).compareTo((a as Map)['bandwidth'] ?? 0));
+                final best = videos.first as Map;
+                var url = best['baseUrl']?.toString() ?? '';
+                // baseUrl 可能是相对路径，需要补全
+                if (url.startsWith('/')) {
+                  url = 'https://upos-sz-mirrorali.bilivideo.com$url';
+                }
+                if (url.isNotEmpty && url.startsWith('http')) videoUrl = url;
+              }
+            }
+            // 方式2: flv 格式 (兜底)
+            if (videoUrl.isEmpty && data['durl'] is List) {
+              final durl = data['durl'] as List;
+              if (durl.isNotEmpty) {
+                var url = (durl.first as Map)['url']?.toString() ?? '';
+                if (url.isNotEmpty) videoUrl = url;
+              }
             }
           }
         }
