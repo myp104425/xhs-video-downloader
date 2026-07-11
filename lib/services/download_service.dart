@@ -132,7 +132,6 @@ class DownloadService {
         // 普通视频文件 — 用 Dio 直接下载
         int lastReceived = 0;
         DateTime lastTime = DateTime.now();
-        bool totalKnown = false;
 
         await _dio.download(
           videoInfo.videoUrl,
@@ -144,14 +143,11 @@ class DownloadService {
                   '(KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36',
               'Referer': 'https://www.xiaohongshu.com/',
             },
-            receiveTimeout: const Duration(seconds: 30),
+            receiveTimeout: const Duration(seconds: 60),
             sendTimeout: const Duration(seconds: 10),
           ),
           onReceiveProgress: (received, total) {
             if (cancelToken.isCancelled) return;
-            // ★ 修复: 当 total = -1 (未知) 时，不计算百分比
-            if (total > 0) totalKnown = true;
-            final displayTotal = totalKnown ? total : received;
             final now = DateTime.now();
             final elapsed = now.difference(lastTime).inMilliseconds;
             double speed = 0;
@@ -162,7 +158,7 @@ class DownloadService {
             }
             controller.add(DownloadProgress(
               received: received,
-              total: displayTotal,
+              total: total, // ★ 直接传递 total（-1 表示未知），model 会处理
               speed: speed,
               stage: DownloadStage.downloading,
             ));

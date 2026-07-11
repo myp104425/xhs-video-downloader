@@ -159,6 +159,8 @@ class _SavePanelState extends State<SavePanel> {
 
       if (_isMp3 || needsTrim) {
         // 需要 FFmpeg 处理
+        // ★ 视频使用 -c copy（快速，不重新编码），失败则兜底
+        // ★ MP3 提取音频
         final cmdBuf = StringBuffer();
         if (startSec > 0) cmdBuf.write('-ss ${_fmtDuration(startSec)} ');
         cmdBuf.write('-i "${widget.filePath}"');
@@ -169,8 +171,8 @@ class _SavePanelState extends State<SavePanel> {
         if (_isMp3) {
           cmdBuf.write(' -vn -acodec libmp3lame -ab 192k');
         } else {
-          // ★ 修复: 视频剪辑先用 -c copy (快速)，如果失败则用 re-encode (兼容)
-          cmdBuf.write(' -c:v libx264 -preset ultrafast -crf 23 -c:a aac');
+          // ★ 用 -c copy (不重新编码，快速无质量损失)
+          cmdBuf.write(' -c copy -avoid_negative_ts make_zero');
         }
         cmdBuf.write(' -y "$savePath"');
 
@@ -179,15 +181,11 @@ class _SavePanelState extends State<SavePanel> {
         final session = await FFmpegKit.execute(cmdBuf.toString());
         final rc = await session.getReturnCode();
         if (!ReturnCode.isSuccess(rc)) {
-          // ★ 如果是视频且 -c:v libx264 失败，尝试最简命令
-          if (!_isMp3) {
-            final fallbackCmd = '-i "${widget.filePath}" -ss ${_fmtDuration(startSec)} -t ${_fmtDuration(endSec > startSec ? endSec - startSec : 0)} -y "$savePath"';
-            final fbSession = await FFmpegKit.execute(fallbackCmd);
-            if (!ReturnCode.isSuccess(await fbSession.getReturnCode())) {
-              throw Exception('视频处理失败，文件格式可能不兼容');
-            }
-          } else {
-            throw Exception('处理失败');
+          // ★ 失败后尝试极简命令（不带额外参数）
+          final simpleCmd = '-i "${widget.filePath}"${_isMp3 ? ' -vn -acodec libmp3lame' : ''} -y "$savePath"';
+          final fbSession = await FFmpegKit.execute(simpleCmd);
+          if (!ReturnCode.isSuccess(await fbSession.getReturnCode())) {
+            throw Exception('处理失败，文件格式可能不兼容');
           }
         }
       } else {
@@ -321,7 +319,7 @@ class _SavePanelState extends State<SavePanel> {
               children: [
                 Icon(Icons.content_cut_rounded, size: 16, color: theme.colorScheme.primary),
                 const SizedBox(width: 8),
-                Text('剪辑', style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurface.withOpacity(0.6))),
+                const Text('MM:SS 剪辑', style: TextStyle(fontSize: 13)),
                 const Spacer(),
                 SizedBox(
                   width: 70, height: 36,

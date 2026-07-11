@@ -213,7 +213,10 @@ class DownloadProgress {
     this.stage = DownloadStage.downloading,
   });
 
-  double get percentage => total > 0 ? received / total : 0.0;
+  /// total > 0 表示服务器返回了文件大小，可算百分比
+  bool get totalKnown => total > 0;
+
+  double get percentage => totalKnown ? received / total : 0.0;
 
   String get formattedPercentage => '${(percentage * 100).toStringAsFixed(1)}%';
 

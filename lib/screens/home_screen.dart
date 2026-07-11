@@ -127,9 +127,16 @@ class _HomeScreenState extends State<HomeScreen>
       (progress) {
         if (!mounted) return;
         setState(() {
-          _downloadProgress = progress.percentage;
-          _downloadStatusText =
-              '${progress.formattedReceived} / ${progress.formattedTotal} · ${progress.formattedSpeed}';
+          if (progress.totalKnown) {
+            _downloadProgress = progress.percentage;
+            _downloadStatusText =
+                '${progress.formattedReceived} / ${progress.formattedTotal} · ${progress.formattedSpeed}';
+          } else {
+            // total未知时，显示已下载大小，用 indeterminate 进度
+            _downloadProgress = -1; // 标记 indeterminate
+            _downloadStatusText =
+                '已下载 ${progress.formattedReceived} · ${progress.formattedSpeed}';
+          }
         });
       },
       onError: (error) {
@@ -481,7 +488,7 @@ class _HomeScreenState extends State<HomeScreen>
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: LinearProgressIndicator(
-              value: _downloadProgress,
+              value: _downloadProgress >= 0 ? _downloadProgress : null,
               minHeight: 8,
               backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
               color: theme.colorScheme.primary,
