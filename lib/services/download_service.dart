@@ -18,12 +18,6 @@ enum DownloadFormat {
   mp3,
 }
 
-/// 下载格式
-enum DownloadFormat {
-  video,
-  mp3,
-}
-
 /// 视频下载服务
 class DownloadService {
   static const String _tag = 'DownloadService';

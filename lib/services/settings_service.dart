@@ -87,7 +87,7 @@ class SettingsService {
     }
     // 测试写入权限
     try {
-      final testFile = File('${path}/.write_test');
+      final testFile = File('$path/.write_test');
       await testFile.writeAsString('test');
       await testFile.delete();
     } catch (e) {
