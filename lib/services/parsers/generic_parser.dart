@@ -53,7 +53,7 @@ class GenericParser extends VideoParser {
 
     // 情况2：获取页面 HTML 进行 VDH 风格嗅探
     final html = await _fetchPage(url, cookie: cookie);
-    return _vdhSniff(html, url);
+    return await _vdhSniff(html, url);
   }
 
   // ─── 直接媒体链接检测 ─────────────────────────────
@@ -88,7 +88,7 @@ class GenericParser extends VideoParser {
 
   // ─── VDH 核心嗅探逻辑 ─────────────────────────────
 
-  VideoInfo _vdhSniff(String html, String sourceUrl) {
+  Future<VideoInfo> _vdhSniff(String html, String sourceUrl) async {
     String? title;
     String? coverUrl;
 
