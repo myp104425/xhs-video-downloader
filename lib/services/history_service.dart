@@ -92,6 +92,18 @@ class HistoryService {
     await saveHistory();
   }
 
+  /// 批量删除记录
+  Future<void> deleteRecords(List<String> noteIds) async {
+    _history.removeWhere((e) => noteIds.contains(e.noteId));
+    await saveHistory();
+  }
+
+  /// 清空所有记录
+  Future<void> clearAll() async {
+    _history.clear();
+    await saveHistory();
+  }
+
   /// 获取所有记录
   List<VideoInfo> get history => _history;
 }
