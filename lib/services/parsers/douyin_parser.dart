@@ -205,13 +205,15 @@ class DouyinParser extends VideoParser {
 
       // 方法2: 从页面文本中正则提取视频地址
       final urlMatches = RegExp(
-        r'https?://[a-zA-Z0-9\./-]+\.(?:mp4|m3u8)[^"\']*',
+        r'https?://[a-zA-Z0-9./-]+\.(?:mp4|m3u8)[^"'"'"']*',
       ).allMatches(html);
       if (urlMatches.isNotEmpty) {
         final noteId = DateTime.now().millisecondsSinceEpoch.toString();
         return VideoInfo(
           noteId: noteId,
           title: '抖音视频',
+          author: '',
+          coverUrl: '',
           videoUrl: urlMatches.first.group(0)!,
           sourceUrl: sourceUrl,
           platform: VideoPlatform.douyin,
