@@ -4,7 +4,8 @@ import 'dart:developer' as developer;
 
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter_mobile_ffmpeg/flutter_mobile_ffmpeg.dart';
+import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter/return_code.dart';
 
 import '../models/video_info.dart';
 import 'settings_service.dart';
@@ -266,21 +267,22 @@ class DownloadService {
       final command = buffer.toString();
       developer.log('FFmpeg: $command', name: _tag);
 
-      final rc = await FFmpeg.execute(command);
+      final session = await FFmpegKit.execute(command);
+      final rc = await session.getReturnCode();
 
-      if (rc != 0) {
+      if (!ReturnCode.isSuccess(rc)) {
         // 如果复杂参数失败，降级为简单参数
         if (format == DownloadFormat.mp3) {
           final fallbackCmd = '-i "$inputPath" -vn -acodec libmp3lame -y "$outputPath"';
-          final fbRc = await FFmpeg.execute(fallbackCmd);
-          if (fbRc != 0) {
+          final fbSession = await FFmpegKit.execute(fallbackCmd);
+          if (!ReturnCode.isSuccess(await fbSession.getReturnCode())) {
             throw Exception('音频转换失败');
           }
         } else {
           // 视频剪辑降级：简单 copy
           final fallbackCmd = '-i "$inputPath" -c copy -y "$outputPath"';
-          final fbRc = await FFmpeg.execute(fallbackCmd);
-          if (fbRc != 0) {
+          final fbSession = await FFmpegKit.execute(fallbackCmd);
+          if (!ReturnCode.isSuccess(await fbSession.getReturnCode())) {
             throw Exception('视频处理失败');
           }
         }
