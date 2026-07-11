@@ -20,44 +20,35 @@ class SettingsService {
 
   /// 获取下载目录
   Future<Directory> getDownloadDirectory() async {
-    // 如果用户设置了自定义路径
+    // 如果用户设置了自定义路径（通过系统文件选择器 SAF 授予权限）
     if (useCustomPath) {
       final customPath = _prefs?.getString(_keyDownloadPath);
       if (customPath != null && customPath.isNotEmpty) {
         final dir = Directory(customPath);
-        if (await dir.exists() || await dir.create(recursive: true).then((_) => true).catchError((_) => false)) {
-          return dir;
+        try {
+          if (await dir.exists() || await dir.create(recursive: true).then((_) => true)) {
+            return dir;
+          }
+        } catch (_) {
+          // 自定义路径不可写，回退到默认
         }
       }
     }
 
-    // 默认：优先使用公共 Download 目录（用户可在文件管理器看到）
+    // 默认：使用应用内部文档目录（Android / iOS 均可写，无权限问题）
     try {
+      final dir = await getApplicationDocumentsDirectory();
+      final downloadDir = Directory('${dir.path}/XHS_Videos');
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+      return downloadDir;
+    } catch (_) {
+      // 极端 fallback
       final dir = Directory('/storage/emulated/0/Download/XHS_Videos');
-      if (await dir.exists() || await dir.create(recursive: true).then((_) => true).catchError((_) => false)) {
-        return dir;
-      }
-    } catch (_) {}
-
-    // 备用 1：getExternalStorageDirectory
-    try {
-      final dir = await getExternalStorageDirectory();
-      if (dir != null) {
-        final downloadDir = Directory('${dir.path}/XHS_Videos');
-        if (!await downloadDir.exists()) {
-          await downloadDir.create(recursive: true);
-        }
-        return downloadDir;
-      }
-    } catch (_) {}
-
-    // 备用 2：应用文档目录
-    final dir = await getApplicationDocumentsDirectory();
-    final downloadDir = Directory('${dir.path}/XHS_Videos');
-    if (!await downloadDir.exists()) {
-      await downloadDir.create(recursive: true);
+      await dir.create(recursive: true);
+      return dir;
     }
-    return downloadDir;
   }
 
   /// 是否使用自定义路径

@@ -5,6 +5,11 @@ import '../../models/video_info.dart';
 import 'parser_base.dart';
 
 /// B站解析器
+///
+/// 解析思路：
+/// 1. 从 URL 提取 BV 号 / AV 号
+/// 2. 调用 B 站公开 API 获取视频元数据（标题、封面、作者等）
+/// 3. 获取视频播放流地址（直链，需 referer）
 class BilibiliParser extends VideoParser {
   @override
   VideoPlatform get platform => VideoPlatform.bilibili;
@@ -12,19 +17,14 @@ class BilibiliParser extends VideoParser {
   static const String _tag = 'BilibiliParser';
   static const Duration _timeout = Duration(seconds: 30);
 
-  static final RegExp _urlPattern = RegExp(
-    r'https?://(?:www\.)?bilibili\.com/(?:video|BV)[a-zA-Z0-9]+',
-  );
-  static final RegExp _bvPattern = RegExp(
-    r'BV[a-zA-Z0-9]+',
-  );
-  static final RegExp _shortUrlPattern = RegExp(
-    r'https?://b23\.tv/[a-zA-Z0-9]+',
-  );
+  static final RegExp _bvPattern = RegExp(r'BV[a-zA-Z0-9]+');
+  static final RegExp _avPattern = RegExp(r'av(\d+)', caseSensitive: false);
+  static final RegExp _shortUrlPattern = RegExp(r'https?://b23\.tv/[a-zA-Z0-9]+');
 
   @override
   bool canParse(String url) {
-    return _urlPattern.hasMatch(url) ||
+    return _bvPattern.hasMatch(url) ||
+        _avPattern.hasMatch(url) ||
         _shortUrlPattern.hasMatch(url) ||
         url.contains('bilibili.com') ||
         url.contains('b23.tv');
@@ -34,67 +34,94 @@ class BilibiliParser extends VideoParser {
   Future<VideoInfo> parse(String url, {String? cookie}) async {
     developer.log('开始解析B站: $url', name: _tag);
 
-    // 短链接
+    // 短链接重定向
     if (_shortUrlPattern.hasMatch(url)) {
       url = await _resolveRedirect(url);
+      developer.log('短链接解析后: $url', name: _tag);
     }
 
     // 提取 BV 号
     final bvMatch = _bvPattern.firstMatch(url);
     final bvId = bvMatch?.group(0);
-
     if (bvId == null) {
       throw Exception('无法从链接中提取B站视频ID（BV号）');
     }
 
-    // B站有官方 API（无需 cookie 即可获取视频信息）
-    final apiUrl = 'https://api.bilibili.com/x/web-interface/view?bvid=$bvId';
-    final response = await http
-        .get(Uri.parse(apiUrl), headers: VideoParser.commonHeaders(referer: 'https://www.bilibili.com'))
+    // 调用 B 站 API 获取视频信息
+    final viewResp = await http
+        .get(
+          Uri.parse('https://api.bilibili.com/x/web-interface/view?bvid=$bvId'),
+          headers: VideoParser.commonHeaders(referer: 'https://www.bilibili.com'),
+        )
         .timeout(_timeout);
 
-    if (response.statusCode != 200) {
-      throw Exception('B站API请求失败: HTTP ${response.statusCode}');
+    if (viewResp.statusCode != 200) {
+      throw Exception('B站API请求失败: HTTP ${viewResp.statusCode}');
     }
 
-    final apiData = jsonDecode(response.body) as Map<String, dynamic>;
-    if (apiData['code'] != 0) {
-      throw Exception('B站API错误: ${apiData['message']}');
+    final viewData = jsonDecode(viewResp.body) as Map<String, dynamic>;
+    if (viewData['code'] != 0) {
+      throw Exception('B站API错误: ${viewData['message'] ?? '未知错误'}');
     }
 
-    final videoData = apiData['data'] as Map<String, dynamic>;
-
-    // B站视频无法直接获取直链（需登录 + referer），但可以获取基本信息和封面
+    final videoData = viewData['data'] as Map<String, dynamic>;
     final title = videoData['title']?.toString() ?? '';
     final author = videoData['owner']?['name']?.toString() ?? '';
     final authorAvatar = videoData['owner']?['face']?.toString() ?? '';
     final coverUrl = videoData['pic']?.toString() ?? '';
-    final duration = videoData['duration'] as int? ?? 0; // 秒
-    final description = videoData['desc']?.toString() ?? '';
+    final duration = videoData['duration'] as int? ?? 0;
+    final desc = videoData['desc']?.toString() ?? '';
     final stat = videoData['stat'] as Map? ?? {};
     final likes = stat['like'] as int? ?? 0;
 
-    // 尝试获取视频播放地址（需要 cookie 和 referer）
+    // 获取 cid（视频分P，默认取第一P）
+    final cid = videoData['cid'] ?? (videoData['pages'] is List ? videoData['pages'][0]?['cid'] : null);
+    final cidStr = cid?.toString() ?? '';
+    if (cidStr.isEmpty) {
+      throw Exception('无法获取视频 cid');
+    }
+
+    // 尝试获取视频播放地址
     String videoUrl = '';
     try {
+      // qn=112 (1080p+), fnval=4048 (DASH + HDR)
       final playUrl =
-          'https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=${videoData['cid']}&qn=112&fnval=0&fnver=0&fourk=1';
-      final playResponse = await http
-          .get(Uri.parse(playUrl),
-              headers: VideoParser.commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'))
+          'https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=112&fnval=4048&fnver=0&fourk=1';
+      final playResp = await http
+          .get(
+            Uri.parse(playUrl),
+            headers: VideoParser.commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'),
+          )
           .timeout(_timeout);
 
-      if (playResponse.statusCode == 200) {
-        final playData = jsonDecode(playResponse.body);
+      if (playResp.statusCode == 200) {
+        final playData = jsonDecode(playResp.body) as Map<String, dynamic>;
         if (playData['code'] == 0) {
-          final durl = playData['data']?['durl'] as List?;
-          if (durl != null && durl.isNotEmpty) {
-            videoUrl = durl[0]['url']?.toString() ?? '';
+          final data = playData['data'] as Map?;
+          if (data != null) {
+            // DASH 格式
+            if (data['dash'] is Map) {
+              final video = (data['dash'] as Map)['video'] as List?;
+              if (video != null && video.isNotEmpty) {
+                // 取最高画质
+                videoUrl = video.last['base_url']?.toString() ?? video.last['baseUrl']?.toString() ?? '';
+                if (videoUrl.isNotEmpty && !videoUrl.startsWith('http')) {
+                  videoUrl = 'https://upos-sz-mirrorali.bilivideo.com$videoUrl';
+                }
+              }
+            }
+            // MP4 格式
+            if (videoUrl.isEmpty && data['durl'] is List) {
+              final durl = data['durl'] as List;
+              if (durl.isNotEmpty) {
+                videoUrl = durl[0]['url']?.toString() ?? '';
+              }
+            }
           }
         }
       }
     } catch (e) {
-      developer.log('B站视频流获取失败(可接受): $e', name: _tag);
+      developer.log('B站视频流获取失败: $e', name: _tag);
     }
 
     return VideoInfo(
@@ -106,9 +133,9 @@ class BilibiliParser extends VideoParser {
       videoUrl: videoUrl,
       sourceUrl: url,
       duration: duration,
-      resolution: '1080p',
+      resolution: videoUrl.isNotEmpty ? '1080p' : '',
       likes: likes,
-      description: description,
+      description: desc,
       platform: VideoPlatform.bilibili,
     );
   }
