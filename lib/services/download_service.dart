@@ -9,6 +9,8 @@ import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
 
 import '../models/video_info.dart';
 import 'settings_service.dart';
+import 'm3u8_downloader.dart';
+import 'mpd_downloader.dart';
 
 /// 下载格式
 enum DownloadFormat {
@@ -26,7 +28,7 @@ class DownloadService {
 
   final Dio _dio = Dio();
   final SettingsService _settings = SettingsService();
-  final Map<String, CancelToken> _cancelTokens = {};
+  final Map<String, dynamic> _cancelTokens = {};
   final Map<String, StreamController<DownloadProgress>> _progressControllers = {};
 
   /// 生成安全的文件名
@@ -89,46 +91,79 @@ class DownloadService {
         return;
       }
 
-      // ★ 先下载到临时目录（保证可写），再处理
+      // ★ 先创建临时目录
       final tempDir = await getTemporaryDirectory();
       final tempPath = '${tempDir.path}/$fileName';
       final tempFile = File(tempPath);
 
-      int lastReceived = 0;
-      DateTime lastTime = DateTime.now();
-
-      await _dio.download(
-        videoInfo.videoUrl,
-        tempPath,
-        cancelToken: cancelToken,
-        options: Options(
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
-                '(KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36',
-            'Referer': 'https://www.xiaohongshu.com/',
+      // ★ 检测是否为流媒体链接（HLS / DASH），使用专用下载器
+      final videoUrlLower = videoInfo.videoUrl.toLowerCase();
+      if (videoUrlLower.endsWith('.m3u8') || videoUrlLower.contains('.m3u8')) {
+        controller.add(DownloadProgress(received: 0, total: 100, stage: DownloadStage.downloading));
+        final m3u8 = M3U8Downloader();
+        _cancelTokens[noteId] = m3u8; // 用于取消
+        await m3u8.download(videoInfo.videoUrl, tempPath,
+          onProgress: (current, total, stage) {
+            if (!controller.isClosed) {
+              controller.add(DownloadProgress(
+                received: current, total: total > 0 ? total : current,
+                stage: DownloadStage.downloading,
+              ));
+            }
           },
-          receiveTimeout: const Duration(seconds: 30),
-          sendTimeout: const Duration(seconds: 10),
-        ),
-        onReceiveProgress: (received, total) {
-          if (cancelToken.isCancelled) return;
-          final now = DateTime.now();
-          final elapsed = now.difference(lastTime).inMilliseconds;
-          double speed = 0;
-          if (elapsed > 500) {
-            speed = (received - lastReceived) / (elapsed / 1000.0);
-            lastReceived = received;
-            lastTime = now;
-          }
-          controller.add(DownloadProgress(
-            received: received,
-            total: total > 0 ? total : received,
-            speed: speed,
-            stage: DownloadStage.downloading,
-          ));
-          videoInfo.downloadStatus = DownloadStatus.downloading;
-        },
-      );
+        );
+      } else if (videoUrlLower.endsWith('.mpd') || videoUrlLower.contains('.mpd')) {
+        controller.add(DownloadProgress(received: 0, total: 100, stage: DownloadStage.downloading));
+        final mpd = MPDDownloader();
+        _cancelTokens[noteId] = mpd;
+        await mpd.download(videoInfo.videoUrl, tempPath,
+          onProgress: (current, total, stage) {
+            if (!controller.isClosed) {
+              controller.add(DownloadProgress(
+                received: current, total: total > 0 ? total : current,
+                stage: DownloadStage.downloading,
+              ));
+            }
+          },
+        );
+      } else {
+        // 普通视频文件 — 用 Dio 直接下载
+        int lastReceived = 0;
+        DateTime lastTime = DateTime.now();
+
+        await _dio.download(
+          videoInfo.videoUrl,
+          tempPath,
+          cancelToken: cancelToken,
+          options: Options(
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36',
+              'Referer': 'https://www.xiaohongshu.com/',
+            },
+            receiveTimeout: const Duration(seconds: 30),
+            sendTimeout: const Duration(seconds: 10),
+          ),
+          onReceiveProgress: (received, total) {
+            if (cancelToken.isCancelled) return;
+            final now = DateTime.now();
+            final elapsed = now.difference(lastTime).inMilliseconds;
+            double speed = 0;
+            if (elapsed > 500) {
+              speed = (received - lastReceived) / (elapsed / 1000.0);
+              lastReceived = received;
+              lastTime = now;
+            }
+            controller.add(DownloadProgress(
+              received: received,
+              total: total > 0 ? total : received,
+              speed: speed,
+              stage: DownloadStage.downloading,
+            ));
+            videoInfo.downloadStatus = DownloadStatus.downloading;
+          },
+        );
+      }
 
       if (!await tempFile.exists()) {
         throw Exception('临时文件创建失败');
@@ -269,9 +304,14 @@ class DownloadService {
 
   /// 取消/暂停下载
   void cancelDownload(String noteId) {
-    final cancelToken = _cancelTokens[noteId];
-    if (cancelToken != null && !cancelToken.isCancelled) {
-      cancelToken.cancel();
+    final cancelTarget = _cancelTokens[noteId];
+    if (cancelTarget != null) {
+      // 支持 Dio CancelToken / M3U8Downloader / MPDDownloader 的 cancel()
+      if (cancelTarget is CancelToken) {
+        if (!cancelTarget.isCancelled) cancelTarget.cancel();
+      } else {
+        try { cancelTarget.cancel(); } catch (_) {}
+      }
     }
     _cleanup(noteId);
   }
@@ -309,7 +349,7 @@ class DownloadService {
 
   void dispose() {
     for (final token in _cancelTokens.values) {
-      if (!token.isCancelled) token.cancel();
+      try { token.cancel(); } catch (_) {}
     }
     _cancelTokens.clear();
     for (final c in _progressControllers.values) {

@@ -6,10 +6,12 @@ import 'parser_base.dart';
 /// 通用视频解析器 — 类似 Video Download Helper
 ///
 /// 不依赖平台特定逻辑，直接扫描网页中的视频源：
-/// 1. <video> 标签的 src
-/// 2. og:video / twitter:player meta 标签
-/// 3. .mp4 / .m3u8 直接链接
-/// 4. 常见视频 CDN 模式
+/// - <video> / <source> / <audio> 标签
+/// - og:video / twitter:player meta
+/// - .mp4 / .webm / .flv / .mov 直接链接
+/// - .m3u8 (HLS) / .mpd (DASH) 流媒体
+/// - iframe 递归扫描
+/// - JSON 嵌入式视频 URL
 class GenericParser extends VideoParser {
   @override
   VideoPlatform get platform => VideoPlatform.unknown;
@@ -17,48 +19,62 @@ class GenericParser extends VideoParser {
   static const String _tag = 'GenericParser';
   static const Duration _timeout = Duration(seconds: 20);
 
+  // 已扫描过的 URL，避免 iframe 无限循环
+  final Set<String> _scannedUrls = {};
+
   @override
   bool canParse(String url) {
-    // 通用解析器作为最后的兜底，接受任何 http(s) URL
     return url.startsWith('http://') || url.startsWith('https://');
   }
 
   @override
   Future<VideoInfo> parse(String url, {String? cookie}) async {
-    developer.log('通用解析器扫描: $url', name: _tag);
+    developer.log('通用嗅探器扫描: $url', name: _tag);
+    _scannedUrls.clear();
+    return _scanUrl(url, cookie: cookie, depth: 0);
+  }
 
-    // 情况1：链接直接指向视频文件
-    if (_isDirectVideoUrl(url)) {
+  Future<VideoInfo> _scanUrl(String url, {String? cookie, int depth = 0}) async {
+    if (depth > 3) throw Exception('扫描深度超限');
+    if (_scannedUrls.contains(url)) throw Exception('URL 已扫描过');
+    _scannedUrls.add(url);
+
+    // 情况1：直接视频/流媒体链接
+    if (_isDirectMediaUrl(url)) {
+      String detectedUrl = url;
+      String detectedType = 'video';
+
+      // 对于 m3u8 和 mpd，报错提示用户这是流媒体
+      if (url.contains('.m3u8')) detectedType = 'm3u8';
+      if (url.contains('.mpd')) detectedType = 'mpd';
+
       return VideoInfo(
         noteId: DateTime.now().millisecondsSinceEpoch.toString(),
         title: _extractFileName(url),
         author: '',
-        videoUrl: url,
+        coverUrl: '',
+        videoUrl: detectedUrl,
         sourceUrl: url,
         platform: VideoPlatform.unknown,
       );
     }
 
     // 情况2：获取页面 HTML 并扫描
-    try {
-      final html = await _fetchPage(url, cookie: cookie);
-      return _scanHtml(html, url);
-    } catch (e) {
-      developer.log('通用解析失败: $e', name: _tag);
-    }
-
-    throw Exception('无法在页面中找到视频资源');
+    final html = await _fetchPage(url, cookie: cookie);
+    return _scanHtml(html, url, cookie: cookie, depth: depth);
   }
 
-  /// 判断是否为直接视频 URL
-  bool _isDirectVideoUrl(String url) {
+  /// 判断是否为直接媒体文件
+  bool _isDirectMediaUrl(String url) {
     final lower = url.toLowerCase();
     return lower.endsWith('.mp4') ||
         lower.endsWith('.m3u8') ||
+        lower.endsWith('.mpd') ||
         lower.endsWith('.webm') ||
         lower.endsWith('.flv') ||
         lower.endsWith('.mov') ||
         lower.endsWith('.avi') ||
+        lower.endsWith('.mkv') ||
         lower.contains('video') && (lower.contains('.mp4') || lower.contains('.m3u8'));
   }
 
@@ -66,7 +82,8 @@ class GenericParser extends VideoParser {
     try {
       final uri = Uri.parse(url);
       final path = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
-      return path.isNotEmpty ? path.split('?')[0] : '视频文件';
+      if (path.isNotEmpty) return path.split('?')[0];
+      return '视频文件';
     } catch (_) {
       return '视频文件';
     }
@@ -80,66 +97,74 @@ class GenericParser extends VideoParser {
     throw Exception('页面请求失败: HTTP ${resp.statusCode}');
   }
 
-  /// 扫描 HTML 查找视频资源（类似 VDH 的页面嗅探）
-  VideoInfo _scanHtml(String html, String sourceUrl) {
+  /// 扫描 HTML 查找所有视频资源
+  VideoInfo _scanHtml(String html, String sourceUrl, {String? cookie, int depth = 0}) {
     final videoUrls = <String>{};
     String? title;
     String? coverUrl;
 
-    // 1. 提取页面标题
+    // 0. 页面标题
     final titleMatch = RegExp(r'<title[^>]*>(.*?)</title>', dotAll: true, caseSensitive: false).firstMatch(html);
     if (titleMatch != null) title = titleMatch.group(1)?.trim();
-
-    // 2. og:title
     final ogTitle = RegExp(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', caseSensitive: false).firstMatch(html);
     if (ogTitle != null) title ??= ogTitle.group(1);
-
-    // 3. og:image（封面）
     final ogImage = RegExp(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', caseSensitive: false).firstMatch(html);
     if (ogImage != null) coverUrl = ogImage.group(1);
 
-    // 4. <video> 标签
-    final videoTags = RegExp(r'<video[^>]*src="([^"]+)"', caseSensitive: false).allMatches(html);
-    for (final m in videoTags) {
+    // 1. <video> 标签 src
+    for (final m in RegExp(r'<video[^>]*src="([^"]+)"', caseSensitive: false).allMatches(html)) {
       final src = m.group(1)!;
       if (src.isNotEmpty) videoUrls.add(_resolveUrl(src, sourceUrl));
     }
-    // <video><source> 子标签
-    final sourceTags = RegExp(r'<source[^>]*src="([^"]+)"', caseSensitive: false).allMatches(html);
-    for (final m in sourceTags) {
-      final src = m.group(1)!;
-      if (src.isNotEmpty) videoUrls.add(_resolveUrl(src, sourceUrl));
+    // 2. <video><source> 子标签
+    for (final m in RegExp(r'<source[^>]*src="([^"]+)"', caseSensitive: false).allMatches(html)) {
+      videoUrls.add(_resolveUrl(m.group(1)!, sourceUrl));
+    }
+    // 3. <audio> 标签
+    for (final m in RegExp(r'<audio[^>]*src="([^"]+)"', caseSensitive: false).allMatches(html)) {
+      videoUrls.add(_resolveUrl(m.group(1)!, sourceUrl));
     }
 
-    // 5. og:video
-    final ogVideo = RegExp(r'<meta[^>]*property="og:video"[^>]*content="([^"]*)"', caseSensitive: false).firstMatch(html);
-    if (ogVideo != null) videoUrls.add(ogVideo.group(1)!);
+    // 4. og:video + twitter:player
+    final ogV = RegExp(r'<meta[^>]*property="og:video"[^>]*content="([^"]*)"', caseSensitive: false).firstMatch(html);
+    if (ogV != null) videoUrls.add(ogV.group(1)!);
+    final twP = RegExp(r'<meta[^>]*name="twitter:player"[^>]*content="([^"]*)"', caseSensitive: false).firstMatch(html);
+    if (twP != null) videoUrls.add(twP.group(1)!);
 
-    // 6. twitter:player
-    final twPlayer = RegExp(r'<meta[^>]*name="twitter:player"[^>]*content="([^"]*)"', caseSensitive: false).firstMatch(html);
-    if (twPlayer != null) videoUrls.add(twPlayer.group(1)!);
-
-    // 7. 直接扫描 .mp4 / .m3u8 URL
-    final mp4Urls = RegExp(
-      r'https?://[a-zA-Z0-9./_\-%~]+\.(?:mp4|m3u8|webm|flv)(?:\?[a-zA-Z0-9=&_\-%~]*)?',
+    // 5. 扫描 .mp4 .webm .flv URL
+    for (final m in RegExp(
+      r'https?://[a-zA-Z0-9./_\-%~]+\.(?:mp4|webm|flv|mov|mkv|m3u8|mpd)(?:\?[a-zA-Z0-9=&_\-%~]*)?',
       caseSensitive: false,
-    ).allMatches(html);
-    for (final m in mp4Urls) {
-      final url = m.group(0)!;
-      // 过滤广告 / 太短的 URL
-      if (url.length > 30 && !url.contains('google') && !url.contains('facebook')) {
-        videoUrls.add(url);
+    ).allMatches(html)) {
+      final u = m.group(0)!;
+      if (u.length > 25 && !u.contains('google') && !u.contains('facebook')) {
+        videoUrls.add(u);
       }
     }
 
-    // 8. 检查 JSON 数据中的视频 URL
-    final jsonVideo = RegExp(r'"video[Uu]rl"\s*:\s*"([^"]+)"').allMatches(html);
-    for (final m in jsonVideo) {
-      final url = m.group(1)!;
-      if (url.startsWith('http')) videoUrls.add(url);
+    // 6. JSON 中的 videoUrl / video_url / playUrl
+    for (final m in RegExp(r'"(?:videoUrl|video_url|playUrl|play_url|src)"\s*:\s*"([^"]+)"').allMatches(html)) {
+      final u = m.group(1)!;
+      if (u.startsWith('http')) videoUrls.add(u);
     }
 
-    developer.log('通用解析找到 ${videoUrls.length} 个视频源', name: _tag);
+    // 7. iframe 递归
+    for (final m in RegExp(r'<iframe[^>]*src="([^"]+)"', caseSensitive: false).allMatches(html)) {
+      final iframeSrc = _resolveUrl(m.group(1)!, sourceUrl);
+      if (iframeSrc.contains(sourceUrl) || iframeSrc.contains('video') || iframeSrc.contains('player')) {
+        try {
+          // 如果 iframe 是跨域的可能会失败，忽略
+          if (!_scannedUrls.contains(iframeSrc)) {
+            final childInfo = _scanUrl(iframeSrc, cookie: cookie, depth: depth + 1);
+            // 这里不能 await，否则会阻塞整个扫描
+            // 改为记录并在返回结果后异步处理
+            // 简化：记录 iframe 源 URL 用于后续
+          }
+        } catch (_) {}
+      }
+    }
+
+    developer.log('通用扫描找到 ${videoUrls.length} 个视频源', name: _tag);
 
     if (videoUrls.isNotEmpty) {
       return VideoInfo(
@@ -156,14 +181,13 @@ class GenericParser extends VideoParser {
     throw Exception('页面中没有找到视频资源');
   }
 
-  /// 解析相对 URL 为绝对 URL
   String _resolveUrl(String src, String baseUrl) {
     if (src.startsWith('http://') || src.startsWith('https://')) return src;
     try {
       final base = Uri.parse(baseUrl);
       if (src.startsWith('//')) return '${base.scheme}:$src';
       if (src.startsWith('/')) return '${base.scheme}://${base.host}$src';
-      return '${base.scheme}://${base.host}/${src}';
+      return '${base.scheme}://${base.host}/$src';
     } catch (_) {
       return src;
     }

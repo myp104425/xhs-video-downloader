@@ -196,12 +196,13 @@ class DouyinParser extends VideoParser {
     }
 
     // 方法2: 直接提取 .mp4 URL
-    final mp4s = RegExp(r'https?://[a-zA-Z0-9./_-]+\.mp4[^"'"'"'\s]*').allMatches(html);
+    final mp4s = RegExp(r'https?://[a-zA-Z0-9./_-]+\.mp4[^"\s]*').allMatches(html);
     if (mp4s.isNotEmpty) {
       return VideoInfo(
         noteId: DateTime.now().millisecondsSinceEpoch.toString(),
         title: '抖音视频',
         author: '',
+        coverUrl: '',
         videoUrl: mp4s.first.group(0)!,
         sourceUrl: sourceUrl,
         platform: VideoPlatform.douyin,
