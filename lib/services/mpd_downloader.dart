@@ -15,7 +15,7 @@ import 'm3u8_downloader.dart';
 class MPDDownloader {
   static const String _tag = 'MPDDownloader';
 
-  CancelToken? _cancelToken;
+  DownloadCancelToken? _cancelToken;
 
   void cancel() {
     _cancelToken?.cancel();
@@ -27,7 +27,7 @@ class MPDDownloader {
     String outputPath, {
     void Function(int current, int total, String stage)? onProgress,
   }) async {
-    _cancelToken = CancelToken();
+    _cancelToken = DownloadCancelToken();
     developer.log('开始下载 MPD: $mpdUrl', name: _tag);
 
     onProgress?.call(0, 0, '正在解析 DASH 清单...');

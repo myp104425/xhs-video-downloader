@@ -14,7 +14,7 @@ import 'package:path_provider/path_provider.dart';
 class M3U8Downloader {
   static const String _tag = 'M3U8Downloader';
 
-  CancelToken? _cancelToken;
+  DownloadCancelToken? _cancelToken;
 
   void cancel() {
     _cancelToken?.cancel();
@@ -26,7 +26,7 @@ class M3U8Downloader {
     String outputPath, {
     void Function(int current, int total, String stage)? onProgress,
   }) async {
-    _cancelToken = CancelToken();
+    _cancelToken = DownloadCancelToken();
     developer.log('开始下载 M3U8: $m3u8Url', name: _tag);
 
     onProgress?.call(0, 0, '正在解析播放列表...');
@@ -178,7 +178,7 @@ class M3U8Downloader {
 }
 
 /// 简单的取消令牌
-class CancelToken {
+class DownloadCancelToken {
   bool _cancelled = false;
   bool get isCancelled => _cancelled;
   void cancel() => _cancelled = true;
