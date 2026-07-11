@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import '../models/video_info.dart';
@@ -59,7 +58,7 @@ class _SavePanelState extends State<SavePanel> {
       // 用 FFmpeg probe 获取时长
       final cmd = '-i "${widget.filePath}" 2>&1';
       final session = await FFmpegKit.execute(cmd);
-      final output = await session.getOutput();
+      final output = (await session.getOutput()) ?? '';
       final match = RegExp(r'Duration: (\d+):(\d+):(\d+)\.\d+').firstMatch(output);
       if (match != null) {
         final h = int.parse(match.group(1)!);
