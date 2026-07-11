@@ -75,7 +75,13 @@ class BilibiliParser extends VideoParser {
     final likes = stat['like'] as int? ?? 0;
 
     // 获取 cid（视频分P，默认取第一P）
-    final cid = videoData['cid'] ?? (videoData['pages'] is List ? (videoData['pages'] as List).firstOrNull?['cid'] : null);
+    dynamic cid = videoData['cid'];
+    if (cid == null) {
+      final pages = videoData['pages'];
+      if (pages is List && pages.isNotEmpty) {
+        cid = pages.first['cid'];
+      }
+    }
     final cidStr = cid?.toString() ?? '';
     if (cidStr.isEmpty) {
       throw Exception('无法获取视频 cid');
