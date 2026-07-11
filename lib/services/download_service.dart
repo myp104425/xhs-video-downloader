@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:developer' as developer;
 
 import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/video_info.dart';
 import 'settings_service.dart';
@@ -63,10 +64,16 @@ class DownloadService {
       final downloadDir = await _settings.getDownloadDirectory();
       final safeName = _sanitizeFileName(videoInfo.title);
       final ext = format == DownloadFormat.mp3 ? '.mp3' : '.mp4';
-      final filePath = '${downloadDir.path}/${safeName}_${videoInfo.noteId}$ext';
-      final file = File(filePath);
+      final fileName = '${safeName}_${noteId}$ext';
+      final filePath = '${downloadDir.path}/$fileName';
+
+      // 先确保下载目录存在
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
 
       // 如果已存在，直接返回
+      final file = File(filePath);
       if (await file.exists() && await file.length() > 0) {
         final size = await file.length();
         controller.add(DownloadProgress(received: size, total: size, stage: DownloadStage.done));
@@ -77,12 +84,17 @@ class DownloadService {
         return;
       }
 
+      // ★ 先下载到临时目录（保证可写），再复制到目标路径
+      final tempDir = await getTemporaryDirectory();
+      final tempPath = '${tempDir.path}/$fileName';
+      final tempFile = File(tempPath);
+
       int lastReceived = 0;
       DateTime lastTime = DateTime.now();
 
       await _dio.download(
         videoInfo.videoUrl,
-        filePath,
+        tempPath,
         cancelToken: cancelToken,
         options: Options(
           headers: {
@@ -113,9 +125,18 @@ class DownloadService {
         },
       );
 
-      final f = File(filePath);
-      if (await f.exists()) {
-        final size = await f.length();
+      // 下载完成，复制到目标路径
+      if (await tempFile.exists()) {
+        // 确保目标目录存在（再次确认）
+        if (!await downloadDir.exists()) {
+          await downloadDir.create(recursive: true);
+        }
+        // 复制文件
+        await tempFile.copy(filePath);
+        // 删除临时文件
+        await tempFile.delete();
+
+        final size = await File(filePath).length();
         videoInfo.downloadStatus = DownloadStatus.completed;
         videoInfo.localPath = filePath;
         videoInfo.downloadTime = DateTime.now();
