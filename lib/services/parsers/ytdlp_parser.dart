@@ -73,6 +73,7 @@ class YtDlpParser extends VideoParser {
               noteId: DateTime.now().millisecondsSinceEpoch.toString(),
               title: title,
               author: '',
+              coverUrl: '',
               videoUrl: videoUrl,
               sourceUrl: url,
               platform: VideoPlatform.unknown,
