@@ -64,7 +64,7 @@ class DownloadService {
       final downloadDir = await _settings.getDownloadDirectory();
       final safeName = _sanitizeFileName(videoInfo.title);
       final ext = format == DownloadFormat.mp3 ? '.mp3' : '.mp4';
-      final fileName = '${safeName}_${noteId}$ext';
+      final fileName = '${safeName}_$noteId$ext';
       final filePath = '${downloadDir.path}/$fileName';
 
       // 先确保下载目录存在
