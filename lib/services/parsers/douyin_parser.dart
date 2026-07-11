@@ -163,9 +163,7 @@ class DouyinParser extends VideoParser {
                 break;
               }
             }
-            if (videoUrl == null) {
-              videoUrl = urlList.first.toString();
-            }
+            videoUrl ??= urlList.first.toString();
           }
           // 如果是 uri 格式，构造完整 URL
           if ((videoUrl == null || videoUrl!.isEmpty) && addr['uri'] != null) {
