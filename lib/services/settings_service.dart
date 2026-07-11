@@ -25,29 +25,39 @@ class SettingsService {
       final customPath = _prefs?.getString(_keyDownloadPath);
       if (customPath != null && customPath.isNotEmpty) {
         final dir = Directory(customPath);
-        if (await dir.exists()) {
+        if (await dir.exists() || await dir.create(recursive: true).then((_) => true).catchError((_) => false)) {
           return dir;
         }
       }
     }
 
-    // 默认：Android Downloads 目录
+    // 默认：优先使用公共 Download 目录（用户可在文件管理器看到）
     try {
-      // Android 10+ 推荐用 getExternalStorageDirectory
-      final dir = await getApplicationDocumentsDirectory();
-      final downloadDir = Directory('${dir.path}/VideoDownloader');
-      if (!await downloadDir.exists()) {
-        await downloadDir.create(recursive: true);
+      final dir = Directory('/storage/emulated/0/Download/XHS_Videos');
+      if (await dir.exists() || await dir.create(recursive: true).then((_) => true).catchError((_) => false)) {
+        return dir;
       }
-      return downloadDir;
-    } catch (e) {
-      final dir = await getApplicationDocumentsDirectory();
-      final downloadDir = Directory('${dir.path}/VideoDownloader');
-      if (!await downloadDir.exists()) {
-        await downloadDir.create(recursive: true);
+    } catch (_) {}
+
+    // 备用 1：getExternalStorageDirectory
+    try {
+      final dir = await getExternalStorageDirectory();
+      if (dir != null) {
+        final downloadDir = Directory('${dir.path}/XHS_Videos');
+        if (!await downloadDir.exists()) {
+          await downloadDir.create(recursive: true);
+        }
+        return downloadDir;
       }
-      return downloadDir;
+    } catch (_) {}
+
+    // 备用 2：应用文档目录
+    final dir = await getApplicationDocumentsDirectory();
+    final downloadDir = Directory('${dir.path}/XHS_Videos');
+    if (!await downloadDir.exists()) {
+      await downloadDir.create(recursive: true);
     }
+    return downloadDir;
   }
 
   /// 是否使用自定义路径

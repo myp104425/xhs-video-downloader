@@ -3,9 +3,12 @@ import 'package:flutter/services.dart';
 import 'screens/home_screen.dart';
 import 'screens/download_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/settings_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 初始化设置（加载下载路径等）
+  await SettingsService().init();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,

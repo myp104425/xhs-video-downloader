@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
 import '../models/video_info.dart';
 import '../services/download_service.dart';
 import '../services/history_service.dart';
@@ -62,11 +63,11 @@ class _DownloadScreenState extends State<DownloadScreen>
       return;
     }
 
-    // 在 Android 上尝试用系统播放器打开
     try {
-      // 使用 open_filex 已在 pubspec 中添加
-      if (mounted) {
-        _showSnackBar('正在打开播放器...');
+      final result = await OpenFilex.open(videoInfo.localPath!);
+      // open_filex 4.x returns OpenResult, just check if it's not done
+      if (mounted && result.message != null && result.message!.contains('error')) {
+        _showSnackBar('无法打开文件，请使用文件管理器手动打开');
       }
     } catch (e) {
       if (mounted) {
