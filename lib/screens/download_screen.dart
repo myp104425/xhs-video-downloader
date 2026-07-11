@@ -64,11 +64,7 @@ class _DownloadScreenState extends State<DownloadScreen>
     }
 
     try {
-      final result = await OpenFilex.open(videoInfo.localPath!);
-      // open_filex 4.x returns OpenResult, just check if it's not done
-      if (mounted && result.message != null && result.message!.contains('error')) {
-        _showSnackBar('无法打开文件，请使用文件管理器手动打开');
-      }
+      await OpenFilex.open(videoInfo.localPath!);
     } catch (e) {
       if (mounted) {
         _showSnackBar('无法打开文件: $e');
