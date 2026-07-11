@@ -88,8 +88,8 @@ class _TrimDialogState extends State<TrimDialog> {
 
           const SizedBox(height: 24),
 
-          if (widget.duration > 0) ...[
-            // 粗选滑块
+          // 粗选滑块（仅有时长信息时显示）
+          if (widget.duration > 0)
             RangeSlider(
               values: RangeValues(_startSeconds.toDouble(), _endSeconds.toDouble()),
               min: 0,
@@ -110,10 +110,11 @@ class _TrimDialogState extends State<TrimDialog> {
                 });
               },
             ),
-            const SizedBox(height: 8),
 
-            // 精确输入
-            Row(
+          const SizedBox(height: 8),
+
+          // 精确输入（即使 duration=0 也显示）
+          Row(
               children: [
                 // 起始时间
                 Expanded(
@@ -141,12 +142,6 @@ class _TrimDialogState extends State<TrimDialog> {
                 ),
               ],
             ),
-          ] else ...[
-            Center(
-              child: Text('视频时长信息不可用，无法剪辑',
-                  style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5))),
-            ),
-          ],
 
           const SizedBox(height: 24),
 
