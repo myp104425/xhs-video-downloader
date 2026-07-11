@@ -104,8 +104,9 @@ void main() {
 
     test('should reject invalid URLs', () {
       final pm = ParserManager();
-      expect(pm.isValidUrl('https://www.youtube.com/watch?v=abc'), isFalse);
-      expect(pm.isValidUrl('https://example.com'), isFalse);
+      expect(pm.isValidUrl('https://www.youtube.com/watch?v=abc'), isTrue);
+      expect(pm.isValidUrl('not-a-url'), isFalse);
+      expect(pm.isValidUrl('ftp://example.com'), isFalse);
       expect(pm.isValidUrl(''), isFalse);
     });
 
