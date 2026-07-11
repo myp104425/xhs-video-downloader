@@ -5,9 +5,8 @@ import '../services/parsers/parser_manager.dart';
 import '../services/download_service.dart';
 import '../services/history_service.dart';
 import '../widgets/url_input_bar.dart';
-import '../widgets/video_card.dart';
 import '../widgets/platform_badge.dart';
-import '../widgets/trim_dialog.dart';
+import '../widgets/save_panel.dart';
 
 /// 首页
 class HomeScreen extends StatefulWidget {
@@ -28,9 +27,12 @@ class _HomeScreenState extends State<HomeScreen>
   String? _errorMessage;
   StreamSubscription? _downloadSubscription;
 
+  // 下载/保存状态
+  bool _isDownloading = false;
   double _downloadProgress = 0;
   String _downloadStatusText = '';
-  bool _isDownloading = false;
+  bool _downloadComplete = false;
+  String? _downloadedFilePath;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
@@ -66,7 +68,7 @@ class _HomeScreenState extends State<HomeScreen>
     await _historyService.loadHistory();
   }
 
-  /// 解析视频
+  /// 解析视频 — 成功后自动下载
   Future<void> _parseVideo(String url) async {
     if (!mounted) return;
 
@@ -77,17 +79,13 @@ class _HomeScreenState extends State<HomeScreen>
       _downloadProgress = 0;
       _downloadStatusText = '';
       _isDownloading = false;
+      _downloadComplete = false;
+      _downloadedFilePath = null;
     });
 
     try {
       if (!_parserManager.isValidUrl(url)) {
-        throw Exception('不支持的链接格式\n\n'
-            '目前支持以下平台：\n'
-            '📕 小红书    xiaohongshu.com\n'
-            '🎵 抖音      douyin.com\n'
-            '📱 快手      kuaishou.com\n'
-            '📺 B站      bilibili.com\n'
-            '📰 微博      weibo.com');
+        throw Exception('不支持的链接格式');
       }
 
       final result = await _parserManager.parse(url);
@@ -100,24 +98,8 @@ class _HomeScreenState extends State<HomeScreen>
 
       _animController.forward(from: 0);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(result.platform.icon, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Text('解析成功: ${result.videoInfo.title}'),
-              ],
-            ),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
+      // 解析成功 → 自动下载
+      _autoDownloadVideo(result.videoInfo);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -127,12 +109,9 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  /// 下载视频
-  Future<void> _downloadVideo(VideoInfo videoInfo) async {
+  /// 解析成功后自动下载
+  Future<void> _autoDownloadVideo(VideoInfo videoInfo) async {
     if (_isDownloading) return;
-
-    // 显示剪辑对话框
-    final trimResult = await TrimDialog.show(context, videoInfo.duration);
 
     setState(() {
       _isDownloading = true;
@@ -142,14 +121,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     await _historyService.addRecord(videoInfo);
 
-    final int trimStart = trimResult != null ? trimResult[0] : 0;
-    final int trimEnd = trimResult != null ? trimResult[1] : 0;
-
-    final stream = _downloadService.downloadVideo(
-      videoInfo,
-      trimStart: trimStart,
-      trimEnd: trimEnd,
-    );
+    final stream = _downloadService.downloadVideo(videoInfo);
 
     _downloadSubscription = stream.listen(
       (progress) {
@@ -170,105 +142,15 @@ class _HomeScreenState extends State<HomeScreen>
       },
       onDone: () {
         if (!mounted) return;
+        final localPath = videoInfo.localPath;
         setState(() {
           _isDownloading = false;
           _downloadProgress = 1.0;
           _downloadStatusText = '下载完成 ✓';
+          _downloadComplete = true;
+          _downloadedFilePath = localPath;
         });
         _historyService.updateRecord(videoInfo);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.check_circle_rounded,
-                    color: Colors.white, size: 18),
-                SizedBox(width: 8),
-                Text('视频下载完成！'),
-              ],
-            ),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            action: SnackBarAction(
-              label: '查看',
-              textColor: Colors.white,
-              onPressed: () {
-                Navigator.pushNamed(context, '/downloads');
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  /// 下载 MP3
-  Future<void> _downloadMp3(VideoInfo videoInfo) async {
-    if (_isDownloading) return;
-
-    setState(() {
-      _isDownloading = true;
-      _downloadProgress = 0;
-      _downloadStatusText = '准备下载...';
-    });
-
-    await _historyService.addRecord(videoInfo);
-
-    final stream = _downloadService.downloadVideo(videoInfo, format: DownloadFormat.mp3);
-
-    _downloadSubscription = stream.listen(
-      (progress) {
-        if (!mounted) return;
-        final stageText = progress.stage == DownloadStage.converting
-            ? '正在处理...'
-            : '${progress.formattedReceived} / ${progress.formattedTotal} · ${progress.formattedSpeed}';
-        setState(() {
-          _downloadProgress = progress.percentage;
-          _downloadStatusText = stageText;
-        });
-      },
-      onError: (error) {
-        if (!mounted) return;
-        setState(() {
-          _isDownloading = false;
-          _errorMessage = error.toString().replaceFirst('Exception: ', '');
-        });
-        _historyService.updateRecord(videoInfo);
-      },
-      onDone: () {
-        if (!mounted) return;
-        setState(() {
-          _isDownloading = false;
-          _downloadProgress = 1.0;
-          _downloadStatusText = '下载完成 ✓';
-        });
-        _historyService.updateRecord(videoInfo);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.check_circle_rounded,
-                    color: Colors.white, size: 18),
-                SizedBox(width: 8),
-                Text('MP3 下载完成！'),
-              ],
-            ),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            action: SnackBarAction(
-              label: '查看',
-              textColor: Colors.white,
-              onPressed: () {
-                Navigator.pushNamed(context, '/downloads');
-              },
-            ),
-          ),
-        );
       },
     );
   }
@@ -352,21 +234,15 @@ class _HomeScreenState extends State<HomeScreen>
                         position: _slideAnim,
                         child: Column(
                           children: [
+                            // 下载进度
                             if (_isDownloading)
                               _buildDownloadProgress(theme),
-                            VideoCard(
-                              videoInfo: _currentVideo!,
-                              onDownload: () =>
-                                  _downloadVideo(_currentVideo!),
-                              onDownloadMp3: () =>
-                                  _downloadMp3(_currentVideo!),
-                              onTrim: () =>
-                                  _downloadVideo(_currentVideo!),
-                              onOpen: _currentVideo!.localPath != null
-                                  ? () {}
-                                  : null,
-                              onDelete: () => _deleteVideo(_currentVideo!),
-                            ),
+                            // 下载完成 → 保存面板（试听+剪辑+重命名+保存）
+                            if (_downloadComplete && _downloadedFilePath != null)
+                              SavePanel(
+                                videoInfo: _currentVideo!,
+                                filePath: _downloadedFilePath!,
+                              ),
                           ],
                         ),
                       ),
@@ -727,24 +603,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Future<void> _deleteVideo(VideoInfo videoInfo) async {
-    if (videoInfo.localPath != null) {
-      await _downloadService.deleteVideo(videoInfo.localPath!);
-    }
-    await _historyService.deleteRecord(videoInfo.noteId);
-    if (mounted) {
-      setState(() => _currentVideo = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('已删除'),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
-    }
-  }
 }
 
 /// 背景装饰
