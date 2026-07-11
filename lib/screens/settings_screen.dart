@@ -35,18 +35,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _pickFolder() async {
-    final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: '选择下载保存目录',
-    );
+    try {
+      final result = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: '选择下载保存目录',
+      );
 
-    if (result != null) {
-      await _settings.setDownloadPath(result);
-      await _loadSettings();
+      if (result != null) {
+        await _settings.setDownloadPath(result);
+        await _loadSettings();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('已设置下载目录: $result'),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('已设置下载目录: $result'),
+            content: Text('设置失败: $e'),
             behavior: SnackBarBehavior.floating,
+            backgroundColor: Colors.red,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),

@@ -18,6 +18,12 @@ enum DownloadFormat {
   mp3,
 }
 
+/// 下载格式
+enum DownloadFormat {
+  video,
+  mp3,
+}
+
 /// 视频下载服务
 class DownloadService {
   static const String _tag = 'DownloadService';
@@ -132,6 +138,7 @@ class DownloadService {
         // 普通视频文件 — 用 Dio 直接下载
         int lastReceived = 0;
         DateTime lastTime = DateTime.now();
+        bool totalKnown = false;
 
         await _dio.download(
           videoInfo.videoUrl,
@@ -148,6 +155,9 @@ class DownloadService {
           ),
           onReceiveProgress: (received, total) {
             if (cancelToken.isCancelled) return;
+            // ★ 修复: 当 total = -1 (未知) 时，不计算百分比
+            if (total > 0) totalKnown = true;
+            final displayTotal = totalKnown ? total : received;
             final now = DateTime.now();
             final elapsed = now.difference(lastTime).inMilliseconds;
             double speed = 0;
@@ -158,7 +168,7 @@ class DownloadService {
             }
             controller.add(DownloadProgress(
               received: received,
-              total: total > 0 ? total : received,
+              total: displayTotal,
               speed: speed,
               stage: DownloadStage.downloading,
             ));

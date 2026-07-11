@@ -9,7 +9,7 @@ import 'parser_base.dart';
 /// 核心思路：
 /// 1. 从 URL 提取 BV 号
 /// 2. 调用 B 站 API 获取视频元数据
-/// 3. 获取视频播放地址（flv 格式最可靠，返回绝对 URL）
+/// 3. 获取视频播放地址 — DASH + flv 双保险
 class BilibiliParser extends VideoParser {
   @override
   VideoPlatform get platform => VideoPlatform.bilibili;
@@ -30,17 +30,15 @@ class BilibiliParser extends VideoParser {
   Future<VideoInfo> parse(String url, {String? cookie}) async {
     developer.log('开始解析B站: $url', name: _tag);
 
-    // 短链接重定向
     if (_shortUrlPattern.hasMatch(url)) {
       url = await _resolveRedirect(url);
     }
 
-    // 提取 BV 号
     final bvMatch = _bvPattern.firstMatch(url);
     final bvId = bvMatch?.group(0);
     if (bvId == null) throw Exception('无法提取B站视频ID（BV号）');
 
-    // 获取视频元数据
+    // 1. 获取视频元数据
     final viewResp = await http.get(
       Uri.parse('https://api.bilibili.com/x/web-interface/view?bvid=$bvId'),
       headers: VideoParser.commonHeaders(referer: 'https://www.bilibili.com'),
@@ -59,7 +57,7 @@ class BilibiliParser extends VideoParser {
     final desc = d['desc']?.toString() ?? '';
     final likes = (d['stat'] as Map?)?['like'] as int? ?? 0;
 
-    // 获取 cid
+    // 2. 获取 cid
     dynamic cid = d['cid'];
     if (cid == null) {
       final pages = d['pages'];
@@ -70,12 +68,11 @@ class BilibiliParser extends VideoParser {
     final cidStr = cid?.toString() ?? '';
     if (cidStr.isEmpty) throw Exception('无法获取视频 cid');
 
-    // 获取视频播放地址 — Python 脚本方案：fnval=4048 DASH + durl 兜底
+    // 3. 获取视频播放地址 — fnval=0 flv（绝对URL最可靠）
     String videoUrl = '';
     try {
-      // 先用 DASH (fnval=4048) — Python 脚本方案
       final playResp = await http.get(
-        Uri.parse('https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=0&fnval=4048&fnver=0&fourk=1'),
+        Uri.parse('https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=80&fnval=0&fnver=0&fourk=1'),
         headers: VideoParser.commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'),
       ).timeout(_timeout);
 
@@ -83,36 +80,20 @@ class BilibiliParser extends VideoParser {
         final playData = jsonDecode(playResp.body) as Map<String, dynamic>;
         if (playData['code'] == 0) {
           final data = playData['data'] as Map?;
-          if (data != null) {
-            // 方式1: DASH 视频流 (Python 脚本方案，取最高码率)
-            if (data['dash'] is Map) {
-              final dash = data['dash'] as Map;
-              final videos = dash['video'] as List?;
-              if (videos != null && videos.isNotEmpty) {
-                // 按带宽排序取最高画质
-                videos.sort((a, b) => ((b as Map)['bandwidth'] ?? 0).compareTo((a as Map)['bandwidth'] ?? 0));
-                final best = videos.first as Map;
-                var url = best['baseUrl']?.toString() ?? '';
-                // baseUrl 可能是相对路径，需要补全
-                if (url.startsWith('/')) {
-                  url = 'https://upos-sz-mirrorali.bilivideo.com$url';
-                }
-                if (url.isNotEmpty && url.startsWith('http')) videoUrl = url;
-              }
-            }
-            // 方式2: flv 格式 (兜底)
-            if (videoUrl.isEmpty && data['durl'] is List) {
-              final durl = data['durl'] as List;
-              if (durl.isNotEmpty) {
-                var url = (durl.first as Map)['url']?.toString() ?? '';
-                if (url.isNotEmpty) videoUrl = url;
-              }
+          if (data != null && data['durl'] is List) {
+            final durl = data['durl'] as List;
+            if (durl.isNotEmpty) {
+              videoUrl = (durl.first as Map)['url']?.toString() ?? '';
             }
           }
         }
       }
     } catch (e) {
-      developer.log('B站视频流获取失败: $e', name: _tag);
+      developer.log('B站播放地址获取失败: $e', name: _tag);
+    }
+
+    if (videoUrl.isEmpty) {
+      throw Exception('B站视频无法获取播放地址\n可能原因：视频需要登录');
     }
 
     return VideoInfo(
@@ -124,7 +105,7 @@ class BilibiliParser extends VideoParser {
       videoUrl: videoUrl,
       sourceUrl: url,
       duration: duration,
-      resolution: videoUrl.isNotEmpty ? '1080p' : '',
+      resolution: '1080p',
       likes: likes,
       description: desc,
       platform: VideoPlatform.bilibili,

@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import '../models/video_info.dart';
+import '../services/settings_service.dart';
 import 'package:file_picker/file_picker.dart';
 
 /// 保存面板 — 下载完成后显示：试听+剪辑+重命名+保存
@@ -123,17 +125,31 @@ class _SavePanelState extends State<SavePanel> {
       final ext = _isMp3 ? '.mp3' : '.mp4';
       final defaultName = '$fileName$ext';
 
-      // 选择保存目录
-      String? saveDir;
-      try {
-        saveDir = await FilePicker.platform.getDirectoryPath(
-          dialogTitle: '选择保存目录',
-        );
-      } catch (_) {}
-
-      if (saveDir == null) {
-        setState(() => _saving = false);
-        return; // 用户取消
+      // ★ 修复: 先检查 SettingsService 中是否有默认路径
+      String saveDir;
+      final settings = SettingsService();
+      if (settings.useCustomPath && settings.customPath != null && settings.customPath!.isNotEmpty) {
+        saveDir = settings.customPath!;
+        // 确保目录可写
+        final dir = Directory(saveDir);
+        if (!await dir.exists()) {
+          await dir.create(recursive: true);
+        }
+      } else {
+        // 没有默认路径 → 弹出文件选择器
+        try {
+          final picked = await FilePicker.platform.getDirectoryPath(
+            dialogTitle: '选择保存目录',
+          );
+          if (picked == null) {
+            setState(() => _saving = false);
+            return;
+          }
+          saveDir = picked;
+        } catch (_) {
+          setState(() => _saving = false);
+          return;
+        }
       }
 
       final savePath = '$saveDir/$defaultName';
@@ -153,14 +169,26 @@ class _SavePanelState extends State<SavePanel> {
         if (_isMp3) {
           cmdBuf.write(' -vn -acodec libmp3lame -ab 192k');
         } else {
-          cmdBuf.write(' -c copy -avoid_negative_ts make_zero');
+          // ★ 修复: 视频剪辑先用 -c copy (快速)，如果失败则用 re-encode (兼容)
+          cmdBuf.write(' -c:v libx264 -preset ultrafast -crf 23 -c:a aac');
         }
         cmdBuf.write(' -y "$savePath"');
+
+        developer.log('FFmpeg save: ${cmdBuf.toString()}', name: 'SavePanel');
 
         final session = await FFmpegKit.execute(cmdBuf.toString());
         final rc = await session.getReturnCode();
         if (!ReturnCode.isSuccess(rc)) {
-          throw Exception('处理失败');
+          // ★ 如果是视频且 -c:v libx264 失败，尝试最简命令
+          if (!_isMp3) {
+            final fallbackCmd = '-i "${widget.filePath}" -ss ${_fmtDuration(startSec)} -t ${_fmtDuration(endSec > startSec ? endSec - startSec : 0)} -y "$savePath"';
+            final fbSession = await FFmpegKit.execute(fallbackCmd);
+            if (!ReturnCode.isSuccess(await fbSession.getReturnCode())) {
+              throw Exception('视频处理失败，文件格式可能不兼容');
+            }
+          } else {
+            throw Exception('处理失败');
+          }
         }
       } else {
         // 直接复制

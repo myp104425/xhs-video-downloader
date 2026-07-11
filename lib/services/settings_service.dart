@@ -72,6 +72,27 @@ class SettingsService {
 
   /// 设置自定义下载路径
   Future<void> setDownloadPath(String path) async {
+    // ★ 修复: 验证路径是否有效
+    if (!path.startsWith('/')) {
+      throw Exception('无效的路径: $path\nAndroid 路径应以 / 开头');
+    }
+    final dir = Directory(path);
+    final exists = await dir.exists();
+    if (!exists) {
+      try {
+        await dir.create(recursive: true);
+      } catch (e) {
+        throw Exception('无法创建目录: $e');
+      }
+    }
+    // 测试写入权限
+    try {
+      final testFile = File('${path}/.write_test');
+      await testFile.writeAsString('test');
+      await testFile.delete();
+    } catch (e) {
+      throw Exception('目录不可写: $e');
+    }
     await _prefs?.setString(_keyDownloadPath, path);
     await _prefs?.setBool(_keyUseCustomPath, true);
   }
