@@ -7,6 +7,7 @@ class VideoCard extends StatelessWidget {
   final VideoInfo videoInfo;
   final VoidCallback? onDownload;
   final VoidCallback? onDownloadMp3;
+  final VoidCallback? onTrim;
   final VoidCallback? onOpen;
   final VoidCallback? onDelete;
 
@@ -15,6 +16,7 @@ class VideoCard extends StatelessWidget {
     required this.videoInfo,
     this.onDownload,
     this.onDownloadMp3,
+    this.onTrim,
     this.onOpen,
     this.onDelete,
   });
@@ -142,6 +144,28 @@ class VideoCard extends StatelessWidget {
                         theme,
                         icon: Icons.storage_outlined,
                         label: videoInfo.formattedSize,
+                      ),
+                    if (onTrim != null)
+                      GestureDetector(
+                        onTap: onTrim,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(colors: [
+                              theme.colorScheme.primary.withOpacity(0.6),
+                              theme.colorScheme.primary.withOpacity(0.4),
+                            ]),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.content_cut_rounded, size: 14, color: Colors.white),
+                              const SizedBox(width: 4),
+                              Text('剪辑', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.white)),
+                            ],
+                          ),
+                        ),
                       ),
                   ],
                 ),

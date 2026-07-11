@@ -7,6 +7,7 @@ import '../services/history_service.dart';
 import '../widgets/url_input_bar.dart';
 import '../widgets/video_card.dart';
 import '../widgets/platform_badge.dart';
+import '../widgets/trim_dialog.dart';
 
 /// 首页
 class HomeScreen extends StatefulWidget {
@@ -130,6 +131,9 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _downloadVideo(VideoInfo videoInfo) async {
     if (_isDownloading) return;
 
+    // 显示剪辑对话框
+    final trimResult = await TrimDialog.show(context, videoInfo.duration);
+
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0;
@@ -138,7 +142,14 @@ class _HomeScreenState extends State<HomeScreen>
 
     await _historyService.addRecord(videoInfo);
 
-    final stream = _downloadService.downloadVideo(videoInfo);
+    final int trimStart = trimResult != null ? trimResult[0] : 0;
+    final int trimEnd = trimResult != null ? trimResult[1] : 0;
+
+    final stream = _downloadService.downloadVideo(
+      videoInfo,
+      trimStart: trimStart,
+      trimEnd: trimEnd,
+    );
 
     _downloadSubscription = stream.listen(
       (progress) {
@@ -349,6 +360,8 @@ class _HomeScreenState extends State<HomeScreen>
                                   _downloadVideo(_currentVideo!),
                               onDownloadMp3: () =>
                                   _downloadMp3(_currentVideo!),
+                              onTrim: () =>
+                                  _downloadVideo(_currentVideo!),
                               onOpen: _currentVideo!.localPath != null
                                   ? () {}
                                   : null,
