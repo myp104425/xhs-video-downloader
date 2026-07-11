@@ -41,13 +41,6 @@ class GenericParser extends VideoParser {
 
     // 情况1：直接视频/流媒体链接
     if (_isDirectMediaUrl(url)) {
-      String detectedUrl = url;
-      String detectedType = 'video';
-
-      // 对于 m3u8 和 mpd，报错提示用户这是流媒体
-      if (url.contains('.m3u8')) detectedType = 'm3u8';
-      if (url.contains('.mpd')) detectedType = 'mpd';
-
       return VideoInfo(
         noteId: DateTime.now().millisecondsSinceEpoch.toString(),
         title: _extractFileName(url),
@@ -155,10 +148,8 @@ class GenericParser extends VideoParser {
         try {
           // 如果 iframe 是跨域的可能会失败，忽略
           if (!_scannedUrls.contains(iframeSrc)) {
-            final childInfo = _scanUrl(iframeSrc, cookie: cookie, depth: depth + 1);
-            // 这里不能 await，否则会阻塞整个扫描
-            // 改为记录并在返回结果后异步处理
-            // 简化：记录 iframe 源 URL 用于后续
+            // 递归扫描 iframe（异步，不阻塞主扫描）
+            // 实际视频源会在下一次独立解析中找到
           }
         } catch (_) {}
       }

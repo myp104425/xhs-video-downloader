@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:developer' as developer;
 import 'package:http/http.dart' as http;
@@ -40,7 +39,6 @@ class MPDDownloader {
     if (mpdContent == null) throw Exception('无法下载 mpd 文件');
 
     // 解析视频和音频 URL
-    String? videoInitUrl, audioInitUrl;
     final videoSegments = <String>[];
     final audioSegments = <String>[];
 
