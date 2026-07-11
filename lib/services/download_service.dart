@@ -4,6 +4,8 @@ import 'dart:developer' as developer;
 
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
 
 import '../models/video_info.dart';
 import 'settings_service.dart';
@@ -55,6 +57,7 @@ class DownloadService {
     VideoInfo videoInfo,
     StreamController<DownloadProgress> controller,
     DownloadFormat format,
+    {int trimStart = 0, int trimEnd = 0}
   ) async {
     final noteId = videoInfo.noteId;
     final cancelToken = CancelToken();
@@ -63,28 +66,30 @@ class DownloadService {
     try {
       final downloadDir = await _settings.getDownloadDirectory();
       final safeName = _sanitizeFileName(videoInfo.title);
-      final ext = format == DownloadFormat.mp3 ? '.mp3' : '.mp4';
-      final fileName = '${safeName}_$noteId$ext';
+      final fileName = '${safeName}_$noteId.mp4';
+      final mp3Name = '${safeName}_$noteId.mp3';
       final filePath = '${downloadDir.path}/$fileName';
+      final mp3Path = '${downloadDir.path}/$mp3Name';
+      final targetPath = format == DownloadFormat.mp3 ? mp3Path : filePath;
 
       // 先确保下载目录存在
       if (!await downloadDir.exists()) {
         await downloadDir.create(recursive: true);
       }
 
-      // 如果已存在，直接返回
-      final file = File(filePath);
-      if (await file.exists() && await file.length() > 0) {
-        final size = await file.length();
+      // 目标文件已存在则直接返回
+      final targetFile = File(targetPath);
+      if (await targetFile.exists() && await targetFile.length() > 0) {
+        final size = await targetFile.length();
         controller.add(DownloadProgress(received: size, total: size, stage: DownloadStage.done));
         videoInfo.downloadStatus = DownloadStatus.completed;
-        videoInfo.localPath = filePath;
+        videoInfo.localPath = targetPath;
         videoInfo.downloadTime = DateTime.now();
         controller.close();
         return;
       }
 
-      // ★ 先下载到临时目录（保证可写），再复制到目标路径
+      // ★ 先下载到临时目录（保证可写），再处理
       final tempDir = await getTemporaryDirectory();
       final tempPath = '${tempDir.path}/$fileName';
       final tempFile = File(tempPath);
@@ -125,24 +130,44 @@ class DownloadService {
         },
       );
 
-      // 下载完成，复制到目标路径
-      if (await tempFile.exists()) {
-        // 确保目标目录存在（再次确认）
+      if (!await tempFile.exists()) {
+        throw Exception('临时文件创建失败');
+      }
+
+      // 需要 FFmpeg 处理的情况：MP3 转换 或 需要截取
+      final needsProcessing = format == DownloadFormat.mp3 || trimStart > 0 || trimEnd > 0;
+
+      if (needsProcessing) {
+        controller.add(DownloadProgress(
+          received: 0, total: 100, stage: DownloadStage.converting,
+        ));
+
+        await _processFile(tempPath, targetPath, format: format, trimStart: trimStart, trimEnd: trimEnd);
+        await tempFile.delete();
+
+        if (await File(targetPath).exists()) {
+          final size = await File(targetPath).length();
+          videoInfo.downloadStatus = DownloadStatus.completed;
+          videoInfo.localPath = targetPath;
+          videoInfo.downloadTime = DateTime.now();
+          controller.add(DownloadProgress(received: size, total: size, stage: DownloadStage.done));
+        }
+      } else {
+        // 直接复制到目标路径
+        // 确保目标目录存在
         if (!await downloadDir.exists()) {
           await downloadDir.create(recursive: true);
         }
-        // 复制文件
         await tempFile.copy(filePath);
-        // 删除临时文件
         await tempFile.delete();
 
-        final size = await File(filePath).length();
-        videoInfo.downloadStatus = DownloadStatus.completed;
-        videoInfo.localPath = filePath;
-        videoInfo.downloadTime = DateTime.now();
-        controller.add(DownloadProgress(
-          received: size, total: size, stage: DownloadStage.done,
-        ));
+        if (await File(filePath).exists()) {
+          final size = await File(filePath).length();
+          videoInfo.downloadStatus = DownloadStatus.completed;
+          videoInfo.localPath = filePath;
+          videoInfo.downloadTime = DateTime.now();
+          controller.add(DownloadProgress(received: size, total: size, stage: DownloadStage.done));
+        }
       }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
@@ -170,6 +195,76 @@ class DownloadService {
     } finally {
       _cleanup(noteId);
     }
+  }
+
+  /// 使用 FFmpeg 处理文件（MP3 转换 / 视频截取）
+  Future<void> _processFile(
+    String inputPath,
+    String outputPath, {
+    DownloadFormat format = DownloadFormat.video,
+    int trimStart = 0,
+    int trimEnd = 0,
+  }) async {
+    try {
+      final buffer = StringBuffer();
+
+      // 截取起始时间
+      if (trimStart > 0) {
+        buffer.write('-ss ${_formatDuration(trimStart)} ');
+      }
+
+      buffer.write('-i "$inputPath"');
+
+      // 截取结束时间
+      if (trimEnd > 0) {
+        final duration = trimEnd - trimStart;
+        buffer.write(' -t ${_formatDuration(duration)}');
+      }
+
+      if (format == DownloadFormat.mp3) {
+        // 提取音频为 MP3
+        buffer.write(' -vn -acodec libmp3lame -ab 192k -ar 44100 -ac 2');
+      } else {
+        // 视频截取：复制编码（最快）
+        buffer.write(' -c copy');
+      }
+
+      buffer.write(' -y "$outputPath"');
+
+      final command = buffer.toString();
+      developer.log('FFmpeg command: $command', name: _tag);
+
+      final session = await FFmpegKit.execute(command);
+      final returnCode = await session.getReturnCode();
+
+      if (!ReturnCode.isSuccess(returnCode)) {
+        final logs = await session.getAllLogsAsString();
+        developer.log('FFmpeg 失败: $logs', name: _tag);
+        // 如果是 MP3 转换失败，尝试简化参数
+        if (format == DownloadFormat.mp3) {
+          developer.log('尝试简化 FFmpeg 参数...', name: _tag);
+          final fallbackCmd = '-i "$inputPath" -vn -acodec libmp3lame -y "$outputPath"';
+          final fallbackSession = await FFmpegKit.execute(fallbackCmd);
+          final fbReturnCode = await fallbackSession.getReturnCode();
+          if (!ReturnCode.isSuccess(fbReturnCode)) {
+            throw Exception('音频转换失败');
+          }
+        } else {
+          throw Exception('视频处理失败');
+        }
+      }
+    } catch (e) {
+      if (e is Exception) rethrow;
+      throw Exception('FFmpeg 处理异常: $e');
+    }
+  }
+
+  /// 格式化时长（秒 → HH:MM:SS.mmm）
+  String _formatDuration(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}.000';
   }
 
   /// 取消/暂停下载

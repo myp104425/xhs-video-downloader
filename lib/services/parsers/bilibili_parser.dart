@@ -79,7 +79,7 @@ class BilibiliParser extends VideoParser {
     if (cid == null) {
       final pages = videoData['pages'];
       if (pages is List && pages.isNotEmpty) {
-        cid = pages.first['cid'];
+        cid = (pages.first as Map)['cid'];
       }
     }
     final cidStr = cid?.toString() ?? '';
@@ -90,9 +90,9 @@ class BilibiliParser extends VideoParser {
     // 尝试获取视频播放地址
     String videoUrl = '';
     try {
-      // qn=112 (1080p+), fnval=4048 (DASH + HDR)
+      // qn=112 (1080p+), fnval=16 (DASH), fnver=0, fourk=1
       final playUrl =
-          'https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=112&fnval=4048&fnver=0&fourk=1';
+          'https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=112&fnval=16&fnver=0&fourk=1';
       final playResp = await http
           .get(
             Uri.parse(playUrl),
@@ -105,22 +105,43 @@ class BilibiliParser extends VideoParser {
         if (playData['code'] == 0) {
           final data = playData['data'] as Map?;
           if (data != null) {
-            // DASH 格式
+            // DASH 格式 - video 列表取最高画质 baseUrl
             if (data['dash'] is Map) {
-              final video = (data['dash'] as Map)['video'] as List?;
-              if (video != null && video.isNotEmpty) {
-                // 取最高画质
-                videoUrl = video.last['base_url']?.toString() ?? video.last['baseUrl']?.toString() ?? '';
-                if (videoUrl.isNotEmpty && !videoUrl.startsWith('http')) {
-                  videoUrl = 'https://upos-sz-mirrorali.bilivideo.com$videoUrl';
+              final dash = data['dash'] as Map;
+              final videoList = dash['video'] as List?;
+              if (videoList != null && videoList.isNotEmpty) {
+                // 取最高画质的 baseUrl
+                final best = videoList.last as Map;
+                var url = best['base_url']?.toString() ?? best['baseUrl']?.toString() ?? '';
+                // DASH 的 base_url 是相对路径，需要拼接 CDN 域名
+                if (url.isNotEmpty) {
+                  if (!url.startsWith('http')) {
+                    // 从 backup_url 提取 CDN 域名
+                    final backup = best['backup_url'] as List?;
+                    if (backup != null && backup.isNotEmpty) {
+                      final fullUrl = backup.first.toString();
+                      final uri = Uri.tryParse(fullUrl);
+                      if (uri != null) {
+                        url = '${uri.scheme}://${uri.host}$url';
+                      }
+                    }
+                  }
+                  videoUrl = url;
                 }
               }
             }
-            // MP4 格式
+            // MP4 格式（flv）
             if (videoUrl.isEmpty && data['durl'] is List) {
               final durl = data['durl'] as List;
               if (durl.isNotEmpty) {
-                videoUrl = durl[0]['url']?.toString() ?? '';
+                var url = (durl.first as Map)['url']?.toString() ?? '';
+                if (url.isNotEmpty) {
+                  // B站 flv 地址可能带重定向
+                  if (!url.contains('.bilivideo.com') && url.contains('://')) {
+                    // 已经是完整 URL
+                  }
+                  videoUrl = url;
+                }
               }
             }
           }

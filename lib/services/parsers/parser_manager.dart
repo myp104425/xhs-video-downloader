@@ -6,6 +6,7 @@ import 'douyin_parser.dart';
 import 'kuaishou_parser.dart';
 import 'bilibili_parser.dart';
 import 'weibo_parser.dart';
+import 'generic_parser.dart';
 
 /// 解析器管理器 — 自动检测平台并路由到对应的解析器
 class ParserManager {
@@ -22,6 +23,8 @@ class ParserManager {
     KuaishouParser(),
     BilibiliParser(),
     WeiboParser(),
+    // 通用解析器（VDH 风格）作为最后的兜底
+    GenericParser(),
   ];
 
   /// 检测 URL 对应的平台
