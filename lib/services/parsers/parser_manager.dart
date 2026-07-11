@@ -1,14 +1,12 @@
 import 'dart:developer' as developer;
 import '../../models/video_info.dart';
 import 'parser_base.dart';
-import 'xiaohongshu_parser.dart';
-import 'douyin_parser.dart';
-import 'kuaishou_parser.dart';
-import 'bilibili_parser.dart';
-import 'weibo_parser.dart';
 import 'generic_parser.dart';
 
-/// 解析器管理器 — 自动检测平台并路由到对应的解析器
+/// 解析器管理器 — VDH 风格嗅探
+///
+/// 核心思路：不依赖平台 API（总是会过时），而是用页面嗅探 + Content-Type 验证。
+/// 所有 URL 都先尝试通用嗅探，平台特定的只是 URL 格式提示。
 class ParserManager {
   static const String _tag = 'ParserManager';
 
@@ -16,59 +14,37 @@ class ParserManager {
   factory ParserManager() => _instance;
   ParserManager._internal();
 
-  /// 所有注册的解析器
-  late final List<VideoParser> _parsers = [
-    XiaohongshuParser(),
-    DouyinParser(),
-    KuaishouParser(),
-    BilibiliParser(),
-    WeiboParser(),
-    // 通用解析器（VDH 风格）作为最后的兜底
-    GenericParser(),
-  ];
+  final GenericParser _genericParser = GenericParser();
 
-  /// 检测 URL 对应的平台
-  VideoPlatform detectPlatform(String url) {
-    for (final parser in _parsers) {
-      if (parser.canParse(url)) {
-        return parser.platform;
-      }
-    }
-    return VideoPlatform.unknown;
-  }
-
-  /// 获取能解析此 URL 的解析器
-  VideoParser? findParser(String url) {
-    for (final parser in _parsers) {
-      if (parser.canParse(url)) {
-        return parser;
-      }
-    }
-    return null;
-  }
-
-  /// 解析视频链接（自动检测平台）
+  /// 解析视频链接（VDH 通用嗅探）
   Future<ParseResult> parse(String url, {String? cookie}) async {
-    final parser = findParser(url);
-    if (parser == null) {
-      throw Exception('不支持的链接格式\n\n'
-          '目前支持以下平台：\n'
-          '📕 小红书    xiaohongshu.com / xhslink.com\n'
-          '🎵 抖音 / TikTok    douyin.com\n'
-          '📱 快手    kuaishou.com\n'
-          '📺 B站    bilibili.com\n'
-          '📰 微博    weibo.com\n\n'
-          '请粘贴以上平台的分享链接');
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw Exception('请输入有效的网页链接（以 http:// 或 https:// 开头）');
     }
 
-    developer.log('检测到平台: ${parser.platform.displayName}', name: _tag);
+    developer.log('VDH嗅探: $url', name: _tag);
 
-    final videoInfo = await parser.parse(url, cookie: cookie);
-    return ParseResult(platform: parser.platform, videoInfo: videoInfo);
+    try {
+      final videoInfo = await _genericParser.parse(url, cookie: cookie);
+      return ParseResult(platform: videoInfo.platform, videoInfo: videoInfo);
+    } catch (e) {
+      developer.log('嗅探失败: $e', name: _tag);
+      rethrow;
+    }
   }
 
-  /// 验证是否为支持的链接
+  /// 验证链接是否可解析
   bool isValidUrl(String url) {
-    return findParser(url) != null;
+    return url.startsWith('http://') || url.startsWith('https://');
+  }
+
+  /// 检测平台（仅作展示用）
+  VideoPlatform detectPlatform(String url) {
+    if (url.contains('xiaohongshu.com') || url.contains('xhslink.com')) return VideoPlatform.xiaohongshu;
+    if (url.contains('douyin.com') || url.contains('iesdouyin.com')) return VideoPlatform.douyin;
+    if (url.contains('kuaishou.com')) return VideoPlatform.kuaishou;
+    if (url.contains('bilibili.com') || url.contains('b23.tv')) return VideoPlatform.bilibili;
+    if (url.contains('weibo.com')) return VideoPlatform.weibo;
+    return VideoPlatform.unknown;
   }
 }

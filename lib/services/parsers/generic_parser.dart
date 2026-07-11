@@ -3,20 +3,31 @@ import 'package:http/http.dart' as http;
 import '../../models/video_info.dart';
 import 'parser_base.dart';
 
-/// 通用视频解析器 — 类似 Video Download Helper
+/// 通用视频嗅探器 — 类似 Video Download Helper
 ///
-/// 扫描网页中所有可能的视频源线索：
-/// - <video> / <source> / <audio> 标签
-/// - meta 标签（og:video, twitter:player）
-/// - .mp4 / .webm / .m3u8 / .mpd 直接 URL
-/// - JSON 中的 videoUrl / playUrl / src 字段
-/// - 常见 CDN 视频路径模式
+/// VDH 的核心原理是监控浏览器网络请求，根据 Content-Type 识别视频文件。
+/// 本解析器在 Flutter 中模拟这个行为：
+/// 1. 下载页面 HTML
+/// 2. 全面扫描所有可能的视频 URL 候选（标签、属性、JSON、正则）
+/// 3. 对每个候选发送 HEAD 请求，检查 Content-Type
+/// 4. 返回第一个确认为 video/* 或 media 类型的 URL
+/// 5. 若没有验证通过的，返回最佳猜测
 class GenericParser extends VideoParser {
   @override
   VideoPlatform get platform => VideoPlatform.unknown;
 
   static const String _tag = 'GenericParser';
-  static const Duration _timeout = Duration(seconds: 20);
+  static const Duration _timeout = Duration(seconds: 15);
+
+  /// 媒体 MIME 类型前缀（VDH 就是靠这些识别视频）
+  static const _mediaTypes = [
+    'video/',
+    'audio/',
+    'application/vnd.apple.mpegurl',
+    'application/x-mpegurl',
+    'application/dash+xml',
+    'application/vnd.ms.apple.mpegurl',
+  ];
 
   @override
   bool canParse(String url) {
@@ -25,9 +36,9 @@ class GenericParser extends VideoParser {
 
   @override
   Future<VideoInfo> parse(String url, {String? cookie}) async {
-    developer.log('通用嗅探器扫描: $url', name: _tag);
+    developer.log('VDH嗅探器扫描: $url', name: _tag);
 
-    // 情况1：直接视频/流媒体文件链接
+    // 情况1：直接是媒体文件链接
     if (_isDirectMediaUrl(url)) {
       return VideoInfo(
         noteId: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -40,25 +51,22 @@ class GenericParser extends VideoParser {
       );
     }
 
-    // 情况2：获取页面 HTML 全面扫描
+    // 情况2：获取页面 HTML 进行 VDH 风格嗅探
     final html = await _fetchPage(url, cookie: cookie);
-    final result = _scanHtml(html, url);
-    if (result != null) return result;
-
-    throw Exception('页面中未找到视频资源\n'
-        '支持扫描以下格式：\n'
-        '- <video> / <source> HTML 标签\n'
-        '- .mp4 / .webm / .m3u8 / .mpd 链接\n'
-        '- og:video / twitter:player meta 标签\n'
-        '- JSON 嵌入式视频地址\n\n'
-        '如果页面有视频但未识别到，建议使用各平台专用解析器');
+    return _vdhSniff(html, url);
   }
+
+  // ─── 直接媒体链接检测 ─────────────────────────────
 
   bool _isDirectMediaUrl(String url) {
     final lower = url.toLowerCase();
+    // VDH 检查的文件后缀
     return lower.endsWith('.mp4') || lower.endsWith('.m3u8') ||
         lower.endsWith('.mpd') || lower.endsWith('.webm') ||
-        lower.endsWith('.flv') || lower.endsWith('.mov') || lower.endsWith('.mkv');
+        lower.endsWith('.flv') || lower.endsWith('.mov') ||
+        lower.endsWith('.mkv') || lower.endsWith('.avi') ||
+        lower.endsWith('.ts') || lower.endsWith('.m4s') ||
+        lower.endsWith('.m4v') || lower.endsWith('.3gp');
   }
 
   String _extractFileName(String url) {
@@ -66,7 +74,7 @@ class GenericParser extends VideoParser {
       final path = Uri.parse(url).pathSegments;
       if (path.isNotEmpty) return path.last.split('?')[0];
     } catch (_) {}
-    return '网页视频';
+    return '视频文件';
   }
 
   Future<String> _fetchPage(String url, {String? cookie}) async {
@@ -78,95 +86,192 @@ class GenericParser extends VideoParser {
     throw Exception('页面请求失败: HTTP ${resp.statusCode}');
   }
 
-  /// 全面扫描 HTML 查找视频资源
-  VideoInfo? _scanHtml(String html, String sourceUrl) {
-    final foundUrls = <String>{};
+  // ─── VDH 核心嗅探逻辑 ─────────────────────────────
+
+  VideoInfo _vdhSniff(String html, String sourceUrl) {
     String? title;
     String? coverUrl;
 
-    // 0. 标题
+    // 提取标题
     try {
       final t = RegExp(r'<title[^>]*>(.*?)</title>', dotAll: true, caseSensitive: false).firstMatch(html);
       if (t != null) title = t.group(1)?.trim();
       final og = RegExp(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', caseSensitive: false).firstMatch(html);
       if (og != null) title ??= og.group(1);
+    } catch (_) {}
+
+    // 提取封面
+    try {
       final oc = RegExp(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', caseSensitive: false).firstMatch(html);
       if (oc != null) coverUrl = oc.group(1);
     } catch (_) {}
 
-    // 1. HTML 标签
-    _addMatches(html, RegExp(r'<video[^>]*src="([^"]+)"', caseSensitive: false), foundUrls, sourceUrl);
-    _addMatches(html, RegExp(r'<source[^>]*src="([^"]+)"', caseSensitive: false), foundUrls, sourceUrl);
-    _addMatches(html, RegExp(r'<audio[^>]*src="([^"]+)"', caseSensitive: false), foundUrls, sourceUrl);
+    // ★ 第一步：收集所有候选视频 URL（VDH 的全面扫描）
+    final candidates = <_VideoCandidate>[];
 
-    // 2. Meta 标签
-    _addMatch(html, RegExp(r'<meta[^>]*property="og:video"[^>]*content="([^"]*)"', caseSensitive: false), foundUrls);
-    _addMatch(html, RegExp(r'<meta[^>]*name="twitter:player"[^>]*content="([^"]*)"', caseSensitive: false), foundUrls);
+    // 1. <video> / <source> / <audio> HTML 标签
+    _addCandidates(html, RegExp(r'<video[^>]*src="([^"]+)"', caseSensitive: false), sourceUrl, candidates);
+    _addCandidates(html, RegExp(r'<source[^>]*src="([^"]+)"', caseSensitive: false), sourceUrl, candidates);
+    _addCandidates(html, RegExp(r'<audio[^>]*src="([^"]+)"', caseSensitive: false), sourceUrl, candidates);
 
-    // 3. 直接扫描 .mp4 / .m3u8 URL（VDH 核心方式）
-    _addMatches(html, RegExp(
-      r'https?://[a-zA-Z0-9./_\-%~]+\.(?:mp4|m3u8|webm|flv|mpd|mov|mkv)(?:\?[a-zA-Z0-9=&_\-%~]*)?',
+    // 2. data-src / data-video / data-url 属性（JS 动态加载）
+    _addCandidates(html, RegExp(r'data-(?:src|video|url|file)="([^"]+)"', caseSensitive: false), sourceUrl, candidates);
+
+    // 3. meta 标签
+    _addCandidates(html, RegExp(r'<meta[^>]*property="og:video"[^>]*content="([^"]*)"', caseSensitive: false), sourceUrl, candidates, ['video/', '.mp4', '.m3u8']);
+    _addCandidates(html, RegExp(r'<meta[^>]*name="twitter:player"[^>]*content="([^"]*)"', caseSensitive: false), sourceUrl, candidates);
+
+    // 4. 直接扫描 .mp4 / .m3u8 / .mpd URL（VDH 核心方式——不依赖标签）
+    _addCandidates(html, RegExp(
+      r'https?://[a-zA-Z0-9./_\-%~]+\.(?:mp4|m3u8|mpd|webm|flv|mov|mkv|ts|m4s)(?:\?[a-zA-Z0-9=&_\-%~]*)?',
       caseSensitive: false,
-    ), foundUrls, sourceUrl, minLen: 25);
+    ), sourceUrl, candidates);
 
-    // 4. JSON 中的视频 URL 字段（VDH 常用方式）
-    _addMatches(html, RegExp(r'"(?:videoUrl|video_url|playUrl|play_url|mp4_url|src|file|url)"\s*:\s*"(https?://[^"]+)"'), foundUrls, sourceUrl);
-
-    // 5. CDN 路径模式
-    _addMatches(html, RegExp(
-      r'''https?://[a-zA-Z0-9.-]*?(?:video|media|vod|cdn|stream|play)[a-zA-Z0-9.-]*/[^<>\s"']+''',
+    // 5. JSON 中的视频 URL 字段
+    _addCandidates(html, RegExp(
+      r'"(?:videoUrl|video_url|playUrl|play_url|mp4_url|src|file|url|stream_url|hls_url|dash_url|media_url)"\s*:\s*"(https?://[^"]+)"',
       caseSensitive: false,
-    ), foundUrls, sourceUrl, minLen: 30);
+    ), sourceUrl, candidates);
 
-    developer.log('通用扫描找到 ${foundUrls.length} 个视频源', name: _tag);
+    // 6. 常见 CDN 视频路径模式
+    _addCandidates(html, RegExp(
+      r"""https?://[a-zA-Z0-9.-]*?(?:video|media|vod|cdn|stream|play|upload|storage|static)[a-zA-Z0-9.-]*/[^<>\s"']+""",
+      caseSensitive: false,
+    ), sourceUrl, candidates);
 
-    if (foundUrls.isNotEmpty) {
-      final bestUrl = _pickBestUrl(foundUrls.toList());
-      return VideoInfo(
-        noteId: DateTime.now().millisecondsSinceEpoch.toString(),
-        title: title ?? '网页视频',
-        author: '',
-        coverUrl: coverUrl ?? '',
-        videoUrl: bestUrl,
-        sourceUrl: sourceUrl,
-        platform: VideoPlatform.unknown,
-      );
+    // 7. 所有带 video 的 <a> 链接
+    _addCandidates(html, RegExp(r'<a[^>]*href="([^"]+)"[^>]*>.*?(?:video|播放|下载|download).*?</a>', caseSensitive: false, dotAll: true), sourceUrl, candidates);
+
+    developer.log('VDH 候选: 找到 ${candidates.length} 个候选 URL', name: _tag);
+
+    if (candidates.isEmpty) {
+      throw Exception('未在页面中找到视频链接\n'
+          'VDH 嗅探已扫描了以下方式：\n'
+          '- <video> / <source> 标签\n'
+          '- og:video / twitter:player meta\n'
+          '- .mp4 / .m3u8 / .mpd 直接链接\n'
+          '- JSON 嵌入式视频地址\n'
+          '- CDN 视频路径模式\n'
+          '- data-* 动态属性');
     }
 
-    return null;
+    // ★ 第二步：用 HEAD 请求验证 Content-Type（VDH 的核心做法）
+    final verified = <_VideoCandidate>[];
+    final unverified = <_VideoCandidate>[];
+
+    // 并行验证前 15 个候选（VDH 风格：检查实际网络响应）
+    final checkResults = await Future.wait(
+      candidates.take(15).map((c) => _checkContentType(c)),
+    );
+
+    for (var i = 0; i < checkResults.length; i++) {
+      if (checkResults[i]) {
+        verified.add(candidates[i]);
+      } else {
+        unverified.add(candidates[i]);
+      }
+    }
+
+    // 优先返回验证通过的，否则返回最佳猜测
+    final best = verified.isNotEmpty
+        ? _pickBest(verified)
+        : _pickBest(unverified);
+
+    developer.log('VDH 最终选择: ${best.url}', name: _tag);
+
+    return VideoInfo(
+      noteId: DateTime.now().millisecondsSinceEpoch.toString(),
+      title: title ?? '网页视频',
+      author: '',
+      coverUrl: coverUrl ?? '',
+      videoUrl: best.url,
+      sourceUrl: sourceUrl,
+      platform: VideoPlatform.unknown,
+    );
   }
 
-  /// 从匹配结果中提取并添加到集合
-  void _addMatch(String html, RegExp pattern, Set<String> urls) {
-    final m = pattern.firstMatch(html);
-    if (m != null && m.group(1)!.isNotEmpty) urls.add(m.group(1)!);
-  }
-
-  void _addMatches(String html, RegExp pattern, Set<String> urls, String baseUrl, {int minLen = 0}) {
+  void _addCandidates(String html, RegExp pattern, String baseUrl, List<_VideoCandidate> candidates, [List<String>? requiredSubstrings]) {
     for (final m in pattern.allMatches(html)) {
       var url = m.groupCount >= 1 ? (m.group(1) ?? m.group(0)!) : m.group(0)!;
       url = _resolveUrl(url, baseUrl);
-      if (url.length >= minLen && url.startsWith('http')) {
-        urls.add(url);
+      if (url.length < 25) continue;
+      if (!url.startsWith('http')) continue;
+      // 过滤明显不是视频的 URL
+      final lower = url.toLowerCase();
+      if (lower.contains('.css') || lower.contains('.js') ||
+          lower.contains('.jpg') || lower.contains('.png') ||
+          lower.contains('.gif') || lower.contains('.svg') ||
+          lower.contains('.ico')) continue;
+      // 如果要求特定子串
+      if (requiredSubstrings != null) {
+        bool match = false;
+        for (final rs in requiredSubstrings) {
+          if (lower.contains(rs) || url.contains(rs)) { match = true; break; }
+        }
+        if (!match) continue;
       }
+      candidates.add(_VideoCandidate(url, _scoreUrl(url)));
     }
   }
 
-  /// 智能选择最佳视频 URL
-  String _pickBestUrl(List<String> urls) {
-    // 优先选 .mp4
-    for (final url in urls) {
-      if (url.contains('.mp4')) return url;
+  int _scoreUrl(String url) {
+    int score = 0;
+    final lower = url.toLowerCase();
+    if (lower.endsWith('.mp4')) score += 100;
+    if (lower.endsWith('.m3u8')) score += 80;
+    if (lower.endsWith('.mpd')) score += 70;
+    if (lower.endsWith('.webm')) score += 60;
+    if (lower.endsWith('.flv')) score += 50;
+    if (lower.contains('.mp4')) score += 30;
+    if (lower.contains('video')) score += 20;
+    if (lower.contains('play')) score += 10;
+    if (lower.contains('watermark')) score -= 50;
+    return score;
+  }
+
+  _VideoCandidate _pickBest(List<_VideoCandidate> candidates) {
+    candidates.sort((a, b) => b.score.compareTo(a.score));
+    return candidates.first;
+  }
+
+  /// 检查 URL 是否为视频文件（VDH 核心：验证 Content-Type）
+  Future<bool> _checkContentType(_VideoCandidate candidate) async {
+    try {
+      final resp = await http.head(
+        Uri.parse(candidate.url),
+        headers: {
+          'User-Agent': VideoParser.desktopUserAgent,
+          'Range': 'bytes=0-0',
+        },
+      ).timeout(const Duration(seconds: 5));
+
+      final ct = resp.headers['content-type']?.toLowerCase() ?? '';
+      if (ct.isNotEmpty && _isMediaType(ct)) {
+        developer.log('✅ 验证通过: ${candidate.url} → $ct', name: _tag);
+        return true;
+      }
+
+      // 某些 CDN 不返回 content-type（302 重定向），但 status 200 说明资源可访问
+      if (resp.statusCode == 200 || resp.statusCode == 206) {
+        // 没有明确的 content-type 但可访问，作为弱验证通过
+        final ext = candidate.url.toLowerCase();
+        if (ext.endsWith('.mp4') || ext.endsWith('.m3u8') || ext.endsWith('.mpd')) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (_) {
+      return false;
     }
-    // 其次选 .m3u8
-    for (final url in urls) {
-      if (url.contains('.m3u8')) return url;
+  }
+
+  bool _isMediaType(String contentType) {
+    final lower = contentType.toLowerCase();
+    for (final mt in _mediaTypes) {
+      if (lower.startsWith(mt)) return true;
     }
-    // 第一个非广告 URL
-    for (final url in urls) {
-      if (!url.contains('google') && !url.contains('facebook')) return url;
-    }
-    return urls.first;
+    return false;
   }
 
   String _resolveUrl(String src, String baseUrl) {
@@ -180,4 +285,10 @@ class GenericParser extends VideoParser {
       return src;
     }
   }
+}
+
+class _VideoCandidate {
+  final String url;
+  final int score;
+  _VideoCandidate(this.url, this.score);
 }
