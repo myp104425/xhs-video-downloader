@@ -3,21 +3,18 @@ import 'dart:io';
 import 'dart:developer' as developer;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
 
-/// M3U8 / HLS 流媒体下载器
+/// M3U8 / HLS 流媒体下载器（纯 Dart，无 FFmpeg）
 ///
 /// 工作流程：
 /// 1. 下载 m3u8 索引文件
 /// 2. 解析 ts 分片列表（支持多码率选择）
 /// 3. 按顺序下载所有 ts 分片
-/// 4. 用 FFmpeg 合并为单一 mp4 文件
-/// 5. 清理临时碎片文件
+/// 4. 用纯 Dart 二进制拼接合并为单一 mp4 文件
 class M3U8Downloader {
   static const String _tag = 'M3U8Downloader';
 
-  DownloadCancelToken? _cancelToken;
+  CancelToken? _cancelToken;
 
   void cancel() {
     _cancelToken?.cancel();
@@ -29,12 +26,11 @@ class M3U8Downloader {
     String outputPath, {
     void Function(int current, int total, String stage)? onProgress,
   }) async {
-    _cancelToken = DownloadCancelToken();
+    _cancelToken = CancelToken();
     developer.log('开始下载 M3U8: $m3u8Url', name: _tag);
 
     onProgress?.call(0, 0, '正在解析播放列表...');
 
-    // 获取基础 URL 用于拼接相对路径
     final baseUrl = _getBaseUrl(m3u8Url);
 
     // 1. 获取 m3u8 内容
@@ -47,14 +43,15 @@ class M3U8Downloader {
 
     developer.log('找到 ${segments.length} 个分片', name: _tag);
 
-    // 3. 创建临时目录
+    // 3. 创建临时目录存放分片
     final tempDir = await getTemporaryDirectory();
     final workDir = Directory('${tempDir.path}/m3u8_${DateTime.now().millisecondsSinceEpoch}');
     await workDir.create(recursive: true);
 
     try {
-      // 4. 下载所有分片
       final tsFiles = <String>[];
+
+      // 4. 下载所有分片
       for (var i = 0; i < segments.length; i++) {
         if (_cancelToken?.isCancelled == true) throw Exception('已取消');
 
@@ -67,34 +64,10 @@ class M3U8Downloader {
         developer.log('分片 ${i + 1}/${segments.length} 下载完成', name: _tag);
       }
 
-      // 5. 创建文件列表
+      // 5. 纯 Dart 二进制拼接合并（无需 FFmpeg）
       onProgress?.call(segments.length, segments.length, '正在合并分片...');
-      final listFile = File('${workDir.path}/file_list.txt');
-      final listContent = tsFiles.map((f) => "file '${f.replaceAll('\\', '/')}'").join('\n');
-      await listFile.writeAsString(listContent);
+      await _concatTsFiles(tsFiles, outputPath);
 
-      // 6. 用 FFmpeg 合并
-      final cmd = '-f concat -safe 0 -i "${listFile.path.replaceAll('\\', '/')}" -c copy -y "$outputPath"';
-      developer.log('FFmpeg concat: $cmd', name: _tag);
-
-      final session = await FFmpegKit.execute(cmd);
-      final rc = await session.getReturnCode();
-
-      if (!ReturnCode.isSuccess(rc)) {
-        // FFmpeg concat 失败，尝试直接 copy 方式
-        developer.log('concat 失败，尝试 copy 方式...', name: _tag);
-        final catCmd = '-i "${tsFiles.first}" -c copy -y "$outputPath"';
-        final fallbackSession = await FFmpegKit.execute(catCmd);
-        final fbRc = await fallbackSession.getReturnCode();
-        if (!ReturnCode.isSuccess(fbRc)) {
-          // 实在不行就保留第一个分片
-          if (tsFiles.isNotEmpty) {
-            await File(tsFiles.first).copy(outputPath);
-          }
-        }
-      }
-
-      // 验证输出文件
       if (await File(outputPath).exists()) {
         final size = await File(outputPath).length();
         developer.log('合并完成: $outputPath ($size bytes)', name: _tag);
@@ -108,7 +81,24 @@ class M3U8Downloader {
     }
   }
 
-  /// 解析 M3U8 索引，返回 ts 片段 URL 列表
+  /// 纯 Dart 合并 TS 分片（二进制拼接）
+  Future<void> _concatTsFiles(List<String> files, String outputPath) async {
+    final output = File(outputPath);
+    final sink = output.openWrite();
+
+    try {
+      for (final file in files) {
+        if (_cancelToken?.isCancelled == true) throw Exception('已取消');
+        final bytes = await File(file).readAsBytes();
+        sink.add(bytes);
+      }
+      await sink.flush();
+    } finally {
+      await sink.close();
+    }
+  }
+
+  /// 解析 M3U8 索引
   Future<List<String>> _parseM3U8(String content, String baseUrl) async {
     final lines = content.split('\n');
     final segments = <String>[];
@@ -116,14 +106,13 @@ class M3U8Downloader {
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i].trim();
 
-      // 检查是否是多码率 m3u8（顶级播放列表）
+      // 多码率 m3u8（顶级播放列表）
       if (line.startsWith('#EXT-X-STREAM-INF')) {
         if (i + 1 < lines.length) {
           final childUrl = _resolveUrl(lines[i + 1].trim(), baseUrl);
           final childContent = await _httpGet(childUrl);
           if (childContent != null) {
             final childSegments = await _parseM3U8(childContent, _getBaseUrl(childUrl));
-            // 取最高码率（最后一个 ts 列表）
             if (childSegments.isNotEmpty) {
               segments.clear();
               segments.addAll(childSegments);
@@ -152,7 +141,6 @@ class M3U8Downloader {
       final base = Uri.parse(baseUrl);
       return '${base.scheme}://${base.host}$url';
     }
-    // 相对路径
     final base = Uri.parse(baseUrl);
     final basePath = base.path.substring(0, base.path.lastIndexOf('/') + 1);
     return '${base.scheme}://${base.host}$basePath$url';
@@ -190,7 +178,7 @@ class M3U8Downloader {
 }
 
 /// 简单的取消令牌
-class DownloadCancelToken {
+class CancelToken {
   bool _cancelled = false;
   bool get isCancelled => _cancelled;
   void cancel() => _cancelled = true;

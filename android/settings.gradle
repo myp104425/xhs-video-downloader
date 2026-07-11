@@ -12,7 +12,6 @@ pluginManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://maven.arthenica.com' }
         gradlePluginPortal()
     }
 }
