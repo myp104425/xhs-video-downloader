@@ -1,9 +1,19 @@
 import 'dart:developer' as developer;
 import '../../models/video_info.dart';
 import 'parser_base.dart';
+import 'generic_parser.dart';
 import 'ytdlp_parser.dart';
+import 'bilibili_parser.dart';
+import 'douyin_parser.dart';
+import 'xiaohongshu_parser.dart';
+import 'kuaishou_parser.dart';
+import 'weibo_parser.dart';
 
-/// 解析器管理器 — 仅使用 yt-dlp API
+/// 解析器管理器 — 多层兜底
+///
+/// 1. 平台专用解析器（小红书/抖音/B站/快手/微博）
+/// 2. 通用嗅探器（扫 HTML 找视频源）
+/// 3. yt-dlp API（Cobalt，仅当平台和嗅探都失败时）
 class ParserManager {
   static const String _tag = 'ParserManager';
 
@@ -11,30 +21,72 @@ class ParserManager {
   factory ParserManager() => _instance;
   ParserManager._internal();
 
-  final YtDlpParser _parser = YtDlpParser();
+  final List<VideoParser> _platformParsers = [
+    XiaohongshuParser(),
+    DouyinParser(),
+    BilibiliParser(),
+    KuaishouParser(),
+    WeiboParser(),
+  ];
 
-  /// 解析视频链接
+  final GenericParser _genericParser = GenericParser();
+  final YtDlpParser _ytdlpParser = YtDlpParser();
+
   Future<ParseResult> parse(String url, {String? cookie}) async {
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       throw Exception('请输入有效的网页链接');
     }
 
-    try {
-      developer.log('yt-dlp 解析: $url', name: _tag);
-      final info = await _parser.parse(url, cookie: cookie);
-      return ParseResult(platform: info.platform, videoInfo: info);
-    } catch (e) {
-      developer.log('yt-dlp 失败: $e', name: _tag);
-      throw Exception('解析失败，请检查链接是否有效');
+    final errors = <String>[];
+
+    // 第1层：平台专用解析器
+    for (final parser in _platformParsers) {
+      if (parser.canParse(url)) {
+        try {
+          developer.log('尝试 ${parser.platform.displayName} 解析器', name: _tag);
+          final info = await parser.parse(url, cookie: cookie);
+          if (info.videoUrl.isNotEmpty) {
+            return ParseResult(platform: parser.platform, videoInfo: info);
+          }
+        } catch (e) {
+          errors.add('${parser.platform.displayName}: $e');
+          developer.log('${parser.platform.displayName} 失败: $e', name: _tag);
+        }
+      }
     }
+
+    // 第2层：通用嗅探器
+    try {
+      developer.log('尝试通用嗅探', name: _tag);
+      final info = await _genericParser.parse(url, cookie: cookie);
+      if (info.videoUrl.isNotEmpty) {
+        return ParseResult(platform: info.platform, videoInfo: info);
+      }
+    } catch (e) {
+      errors.add('通用嗅探: $e');
+      developer.log('通用嗅探失败: $e', name: _tag);
+    }
+
+    // 第3层：yt-dlp API 兜底
+    try {
+      developer.log('尝试 yt-dlp API', name: _tag);
+      final info = await _ytdlpParser.parse(url, cookie: cookie);
+      if (info.videoUrl.isNotEmpty) {
+        return ParseResult(platform: info.platform, videoInfo: info);
+      }
+    } catch (e) {
+      errors.add('yt-dlp: $e');
+      developer.log('yt-dlp 失败: $e', name: _tag);
+    }
+
+    throw Exception('所有解析方式均失败\n'
+        '已尝试：\n${errors.map((e) => '• $e').join('\n')}');
   }
 
-  /// 验证链接是否可解析
   bool isValidUrl(String url) {
     return url.startsWith('http://') || url.startsWith('https://');
   }
 
-  /// 检测平台
   VideoPlatform detectPlatform(String url) {
     if (url.contains('xiaohongshu.com') || url.contains('xhslink.com')) return VideoPlatform.xiaohongshu;
     if (url.contains('douyin.com') || url.contains('iesdouyin.com')) return VideoPlatform.douyin;
