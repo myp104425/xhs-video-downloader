@@ -34,7 +34,7 @@ class SettingsService {
     }
 
     // 默认：优先使用 Android Download 目录（用户能在文件管理器看到）
-    final downloadPath = '/storage/emulated/0/Download/XHS_Videos';
+    const downloadPath = '/storage/emulated/0/Download/XHS_Videos';
     try {
       final dir = Directory(downloadPath);
       if (await dir.exists() || await dir.create(recursive: true).then((_) => true)) {
