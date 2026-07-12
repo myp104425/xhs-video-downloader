@@ -133,47 +133,29 @@ class _SavePanelState extends State<SavePanel> {
       final ext = _isMp3 ? '.mp3' : '.mp4';
       final defaultName = '$fileName$ext';
 
-      // ★ 修复: 先检查 SettingsService 中是否有默认路径
-      String saveDir;
+      // ★ 直接使用 SettingsService 的下载目录（无需用户选择）
       final settings = SettingsService();
-      if (settings.useCustomPath && settings.customPath != null && settings.customPath!.isNotEmpty) {
-        saveDir = settings.customPath!;
-        // 确保目录可写
-        final dir = Directory(saveDir);
-        if (!await dir.exists()) {
-          await dir.create(recursive: true);
-        }
-      } else {
-        // 没有默认路径 → 弹出文件选择器
-        try {
-          final picked = await FilePicker.platform.getDirectoryPath(
-            dialogTitle: '选择保存目录',
-          );
-          if (picked == null) {
-            setState(() => _saving = false);
-            return;
-          }
-          saveDir = picked;
-        } catch (_) {
-          setState(() => _saving = false);
-          return;
-        }
+      final saveDir = await settings.getDownloadDirectory();
+
+      // 确保目录存在
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
       }
 
-      final savePath = '$saveDir/$defaultName';
+      final savePath = '${saveDir.path}/$defaultName';
       final startSec = _parseTime(_startCtrl.text);
       final endSec = _parseTime(_endCtrl.text);
       final needsTrim = (startSec > 0 || (endSec > 0 && endSec < _durationSec));
 
       if (_isMp3 || needsTrim) {
-        // ★ FFmpeg 输出到临时目录（总是可写），再复制到目标路径
+        // ★ FFmpeg 输出到临时目录（总是可写）
         final tempDir = await getTemporaryDirectory();
         final tempExt = _isMp3 ? '.mp3' : '.mp4';
         final tempFilePath = '${tempDir.path}/save_temp_${DateTime.now().millisecondsSinceEpoch}$tempExt';
 
         final cmdBuf = StringBuffer();
         cmdBuf.write('-i "${widget.filePath}"');
-        // ★ -ss 放在 -i 后面（slow seek 精准）+ copyts，避免某些格式失败
+        // -ss 放在 -i 后面（精准 seek）+ copyts
         if (startSec > 0) cmdBuf.write(' -ss ${_fmtDurationTrim(startSec)}');
         if (endSec > 0 && endSec > startSec) {
           final dur = endSec - startSec;
@@ -189,43 +171,37 @@ class _SavePanelState extends State<SavePanel> {
         developer.log('FFmpeg save: ${cmdBuf.toString()}', name: 'SavePanel');
 
         bool ok = false;
-        var session = await FFmpegKit.execute(cmdBuf.toString());
+        final session = await FFmpegKit.execute(cmdBuf.toString());
         if (ReturnCode.isSuccess(await session.getReturnCode())) {
           ok = true;
         } else {
           // 降级：最简命令
           final simple = '-i "${widget.filePath}"${_isMp3 ? ' -vn -acodec libmp3lame' : ''} -y "$tempFilePath"';
-          session = await FFmpegKit.execute(simple);
-          if (ReturnCode.isSuccess(await session.getReturnCode())) ok = true;
+          final fbSession = await FFmpegKit.execute(simple);
+          if (ReturnCode.isSuccess(await fbSession.getReturnCode())) ok = true;
         }
 
         if (!ok) throw Exception('处理失败');
-
         if (!await File(tempFilePath).exists()) throw Exception('临时文件未生成');
-        // 复制到目标路径，如果失败则尝试 FFmpeg 直接写入（绕过 scoped storage 限制）
-        try {
-          await File(tempFilePath).copy(savePath);
-        } catch (e) {
-          developer.log('copy 失败，尝试 FFmpeg 直接写入: $e', name: 'SavePanel');
-          // 降级：让 FFmpeg 直接写入目标路径（FFmpeg 用原生 C/C++ IO，可能绕过一些限制）
-          final directCmd = '-i "${widget.filePath}"${startSec > 0 ? ' -ss ${_fmtDuration(startSec)}' : ''}${(endSec > 0 && endSec > startSec) ? ' -t ${_fmtDuration(endSec - startSec)}' : ''}${_isMp3 ? ' -vn -acodec libmp3lame -ab 192k' : ' -c copy'} -y "$savePath"';
-          final directSession = await FFmpegKit.execute(directCmd);
-          if (!ReturnCode.isSuccess(await directSession.getReturnCode())) {
-            throw Exception('无法写入目标路径');
-          }
-        }
+
+        // ★ 临时文件 → 目标路径（都在 app 可控目录内，不会权限失败）
+        await File(tempFilePath).copy(savePath);
         try { await File(tempFilePath).delete(); } catch (_) {}
       } else {
-        // 不剪辑、不转MP3 → 直接复制文件
+        // 不剪辑、不转MP3 → 直接复制（app 可控目录）
         await File(widget.filePath).copy(savePath);
       }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('已保存到: $savePath'),
+            content: Text('已保存到: ${saveDir.path}'),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: '打开',
+              onPressed: () => _play(),
+            ),
           ),
         );
       }

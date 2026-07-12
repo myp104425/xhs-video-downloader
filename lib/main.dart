@@ -4,11 +4,14 @@ import 'screens/home_screen.dart';
 import 'screens/download_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/settings_service.dart';
+import 'services/permission_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 初始化设置（加载下载路径等）
   await SettingsService().init();
+  // 请求存储权限
+  await PermissionService.requestStoragePermission();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
