@@ -91,6 +91,13 @@ class _SavePanelState extends State<SavePanel> {
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
+  /// FFmpeg 用的时长格式（秒，不带 HH:）
+  String _fmtDurationTrim(int sec) {
+    final m = sec ~/ 60;
+    final s = sec % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
   int _parseTime(String str) {
     final parts = str.split(':');
     if (parts.length == 2) {
@@ -165,11 +172,12 @@ class _SavePanelState extends State<SavePanel> {
         final tempFilePath = '${tempDir.path}/save_temp_${DateTime.now().millisecondsSinceEpoch}$tempExt';
 
         final cmdBuf = StringBuffer();
-        if (startSec > 0) cmdBuf.write('-ss ${_fmtDuration(startSec)} ');
         cmdBuf.write('-i "${widget.filePath}"');
+        // ★ -ss 放在 -i 后面（slow seek 精准）+ copyts，避免某些格式失败
+        if (startSec > 0) cmdBuf.write(' -ss ${_fmtDurationTrim(startSec)}');
         if (endSec > 0 && endSec > startSec) {
           final dur = endSec - startSec;
-          cmdBuf.write(' -t ${_fmtDuration(dur)}');
+          cmdBuf.write(' -t ${_fmtDurationTrim(dur)}');
         }
         if (_isMp3) {
           cmdBuf.write(' -vn -acodec libmp3lame -ab 192k');
@@ -194,7 +202,18 @@ class _SavePanelState extends State<SavePanel> {
         if (!ok) throw Exception('处理失败');
 
         if (!await File(tempFilePath).exists()) throw Exception('临时文件未生成');
-        await File(tempFilePath).copy(savePath);
+        // 复制到目标路径，如果失败则尝试 FFmpeg 直接写入（绕过 scoped storage 限制）
+        try {
+          await File(tempFilePath).copy(savePath);
+        } catch (e) {
+          developer.log('copy 失败，尝试 FFmpeg 直接写入: $e', name: 'SavePanel');
+          // 降级：让 FFmpeg 直接写入目标路径（FFmpeg 用原生 C/C++ IO，可能绕过一些限制）
+          final directCmd = '-i "${widget.filePath}"${startSec > 0 ? ' -ss ${_fmtDuration(startSec)}' : ''}${(endSec > 0 && endSec > startSec) ? ' -t ${_fmtDuration(endSec - startSec)}' : ''}${_isMp3 ? ' -vn -acodec libmp3lame -ab 192k' : ' -c copy'} -y "$savePath"';
+          final directSession = await FFmpegKit.execute(directCmd);
+          if (!ReturnCode.isSuccess(await directSession.getReturnCode())) {
+            throw Exception('无法写入目标路径');
+          }
+        }
         try { await File(tempFilePath).delete(); } catch (_) {}
       } else {
         // 不剪辑、不转MP3 → 直接复制文件
@@ -335,14 +354,24 @@ class _SavePanelState extends State<SavePanel> {
                     controller: _startCtrl,
                     textAlign: TextAlign.center,
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d:]')), LengthLimitingTextInputFormatter(5)],
+                    inputFormatters: [LengthLimitingTextInputFormatter(5)],
                     decoration: InputDecoration(
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       contentPadding: EdgeInsets.zero,
-                      hintText: '00:00',
+                      hintText: 'MM:SS',
                       hintStyle: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface.withOpacity(0.3)),
                     ),
                     style: const TextStyle(fontSize: 14, fontFamily: 'monospace'),
+                    onChanged: (v) {
+                      // 自动补全冒号
+                      final digits = v.replaceAll(RegExp(r'[^\d]'), '');
+                      if (digits.length >= 2) {
+                        final m = digits.substring(0, 2);
+                        final s = digits.length > 2 ? digits.substring(2, digits.length.clamp(2, 4)) : '';
+                        _startCtrl.text = s.isNotEmpty ? '$m:$s' : m;
+                        _startCtrl.selection = TextSelection.collapsed(offset: _startCtrl.text.length);
+                      }
+                    },
                   ),
                 ),
                 Padding(
@@ -355,14 +384,23 @@ class _SavePanelState extends State<SavePanel> {
                     controller: _endCtrl,
                     textAlign: TextAlign.center,
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d:]')), LengthLimitingTextInputFormatter(5)],
+                    inputFormatters: [LengthLimitingTextInputFormatter(5)],
                     decoration: InputDecoration(
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       contentPadding: EdgeInsets.zero,
-                      hintText: '结束',
+                      hintText: 'MM:SS',
                       hintStyle: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface.withOpacity(0.3)),
                     ),
                     style: const TextStyle(fontSize: 14, fontFamily: 'monospace'),
+                    onChanged: (v) {
+                      final digits = v.replaceAll(RegExp(r'[^\d]'), '');
+                      if (digits.length >= 2) {
+                        final m = digits.substring(0, 2);
+                        final s = digits.length > 2 ? digits.substring(2, digits.length.clamp(2, 4)) : '';
+                        _endCtrl.text = s.isNotEmpty ? '$m:$s' : m;
+                        _endCtrl.selection = TextSelection.collapsed(offset: _endCtrl.text.length);
+                      }
+                    },
                   ),
                 ),
               ],
