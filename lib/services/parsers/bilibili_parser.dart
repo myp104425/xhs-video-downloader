@@ -68,32 +68,75 @@ class BilibiliParser extends VideoParser {
     final cidStr = cid?.toString() ?? '';
     if (cidStr.isEmpty) throw Exception('无法获取视频 cid');
 
-    // 3. 获取视频播放地址 — fnval=0 flv（绝对URL最可靠）
+    // 3. 获取视频播放地址 — DASH + flv 双保险
     String videoUrl = '';
+    final errors = <String>[];
+
+    // 方式A: flv 格式 (fnval=0)
     try {
-      final playResp = await http.get(
-        Uri.parse('https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=80&fnval=0&fnver=0&fourk=1'),
+      final resp = await http.get(
+        Uri.parse('https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=32&fnval=0&fnver=0&fourk=1'),
         headers: VideoParser.commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'),
       ).timeout(_timeout);
 
-      if (playResp.statusCode == 200) {
-        final playData = jsonDecode(playResp.body) as Map<String, dynamic>;
-        if (playData['code'] == 0) {
-          final data = playData['data'] as Map?;
-          if (data != null && data['durl'] is List) {
-            final durl = data['durl'] as List;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        if (data['code'] == 0) {
+          final pd = data['data'] as Map?;
+          if (pd != null && pd['durl'] is List) {
+            final durl = pd['durl'] as List;
             if (durl.isNotEmpty) {
               videoUrl = (durl.first as Map)['url']?.toString() ?? '';
             }
           }
         }
       }
-    } catch (e) {
-      developer.log('B站播放地址获取失败: $e', name: _tag);
+    } catch (e) { errors.add('flv: $e'); }
+
+    // 方式B: DASH 格式 (fnval=4048)
+    if (videoUrl.isEmpty) {
+      try {
+        final resp = await http.get(
+          Uri.parse('https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=32&fnval=16&fnver=0&fourk=1'),
+          headers: VideoParser.commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'),
+        ).timeout(_timeout);
+
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          if (data['code'] == 0) {
+            final pd = data['data'] as Map?;
+            if (pd != null && pd['durl'] is List) {
+              final durl = pd['durl'] as List;
+              if (durl.isNotEmpty) {
+                videoUrl = (durl.first as Map)['url']?.toString() ?? '';
+              }
+            }
+          }
+        }
+      } catch (e) { errors.add('dash: $e'); }
+    }
+
+    // 方式C: 720p (qn=64)
+    if (videoUrl.isEmpty) {
+      try {
+        final resp = await http.get(
+          Uri.parse('https://api.bilibili.com/x/player/playurl?bvid=$bvId&cid=$cidStr&qn=64&fnval=0&fnver=0'),
+          headers: VideoParser.commonHeaders(cookie: cookie, referer: 'https://www.bilibili.com'),
+        ).timeout(_timeout);
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          if (data['code'] == 0) {
+            final pd = data['data'] as Map?;
+            if (pd != null && pd['durl'] is List && (pd['durl'] as List).isNotEmpty) {
+              videoUrl = ((pd['durl'] as List).first as Map)['url']?.toString() ?? '';
+            }
+          }
+        }
+      } catch (e) { errors.add('720p: $e'); }
     }
 
     if (videoUrl.isEmpty) {
-      throw Exception('B站视频无法获取播放地址\n可能原因：视频需要登录');
+      throw Exception('B站视频无法获取播放地址\n${errors.join('\n')}');
     }
 
     return VideoInfo(

@@ -80,6 +80,20 @@ class WeiboParser extends VideoParser {
       );
     }
 
+    // 兜底：查找任何 .mp4 URL
+    final mp4Match = RegExp(r'''https?://[a-zA-Z0-9./_\-%~]+\.mp4[^<>\s"']*''').firstMatch(html);
+    if (mp4Match != null) {
+      return VideoInfo(
+        noteId: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: titleMatch?.group(1)?.replaceAll('\\u002F', '/') ?? '微博视频',
+        author: '',
+        coverUrl: coverMatch?.group(1)?.replaceAll('\\u002F', '/') ?? '',
+        videoUrl: mp4Match.group(0)!,
+        sourceUrl: url,
+        platform: VideoPlatform.weibo,
+      );
+    }
+
     throw Exception('无法从微博页面中解析出视频信息');
   }
 
