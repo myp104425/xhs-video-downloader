@@ -4,14 +4,22 @@ import 'package:http/http.dart' as http;
 import '../../models/video_info.dart';
 import 'parser_base.dart';
 
-/// yt-dlp API 兜底解析器
-/// 当平台专用解析器失败时，使用公开 REST API 尝试解析
+/// yt-dlp API 解析器 — 使用公开 Cobalt API
+///
+/// 调用 yt-dlp 的公开 REST 服务解析任意网页视频。
+/// 维护说明：如果 API 失效，替换以下 _endpoints 列表中的 URL 即可。
 class YtDlpParser extends VideoParser {
   @override
   VideoPlatform get platform => VideoPlatform.unknown;
 
   static const String _tag = 'YtDlpParser';
   static const Duration _timeout = Duration(seconds: 30);
+
+  // 多个公开 API 端点，依次尝试
+  static const List<String> _endpoints = [
+    'https://cobalt.tools/api/json',
+    'https://api.cobalt.tools/',
+  ];
 
   @override
   bool canParse(String url) {
@@ -21,12 +29,27 @@ class YtDlpParser extends VideoParser {
   @override
   Future<VideoInfo> parse(String url, {String? cookie}) async {
     developer.log('yt-dlp API 解析: $url', name: _tag);
-    return await _parseViaApi(url);
+
+    final errors = <String>[];
+
+    for (final endpoint in _endpoints) {
+      try {
+        return await _tryEndpoint(endpoint, url);
+      } catch (e) {
+        errors.add('$endpoint: $e');
+        developer.log('端点 $endpoint 失败: $e', name: _tag);
+      }
+    }
+
+    throw Exception('解析失败\n'
+        '已尝试以下 API 端点均未成功：\n'
+        '${errors.map((e) => '• $e').join('\n')}\n\n'
+        '请稍后重试，或检查链接是否有效');
   }
 
-  Future<VideoInfo> _parseViaApi(String url) async {
+  Future<VideoInfo> _tryEndpoint(String endpoint, String url) async {
     final resp = await http.post(
-      Uri.parse('https://cobalt-api.deno.dev/'),
+      Uri.parse(endpoint),
       headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       body: jsonEncode({
         'url': url,
@@ -40,6 +63,8 @@ class YtDlpParser extends VideoParser {
 
     if (resp.statusCode == 200) {
       final data = jsonDecode(resp.body) as Map;
+
+      // Cobalt v2 响应格式
       if (data['status'] == 'success' || data['status'] == 'stream') {
         final videoUrl = data['url']?.toString() ?? data['stream']?.toString() ?? '';
         final title = data['filename']?.toString() ?? data['title']?.toString() ?? '';
@@ -55,7 +80,23 @@ class YtDlpParser extends VideoParser {
           );
         }
       }
+
+      // Cobalt v1 响应格式（兼容）
+      if (data['text'] != null) {
+        final videoUrl = data['text'].toString();
+        if (videoUrl.startsWith('http')) {
+          return VideoInfo(
+            noteId: DateTime.now().millisecondsSinceEpoch.toString(),
+            title: data['filename']?.toString() ?? '',
+            author: '',
+            coverUrl: '',
+            videoUrl: videoUrl,
+            sourceUrl: url,
+            platform: VideoPlatform.unknown,
+          );
+        }
+      }
     }
-    throw Exception('API 返回异常，请稍后重试');
+    throw Exception('HTTP ${resp.statusCode}');
   }
 }
