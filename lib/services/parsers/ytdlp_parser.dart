@@ -20,13 +20,8 @@ class YtDlpParser extends VideoParser {
 
   @override
   Future<VideoInfo> parse(String url, {String? cookie}) async {
-    developer.log('尝试 yt-dlp API 解析: $url', name: _tag);
-    try {
-      return await _parseViaApi(url);
-    } catch (e) {
-      developer.log('yt-dlp API 失败: $e', name: _tag);
-    }
-    throw Exception('yt-dlp 解析失败');
+    developer.log('yt-dlp API 解析: $url', name: _tag);
+    return await _parseViaApi(url);
   }
 
   Future<VideoInfo> _parseViaApi(String url) async {
@@ -61,6 +56,6 @@ class YtDlpParser extends VideoParser {
         }
       }
     }
-    throw Exception('API 返回异常');
+    throw Exception('API 返回异常，请稍后重试');
   }
 }
