@@ -202,6 +202,9 @@ class DownloadService {
         videoInfo.downloadTime = DateTime.now();
         controller.add(DownloadProgress(received: size, total: size, stage: DownloadStage.done));
       }
+
+      // ★★★ 关键修复: 关闭控制器，触发 onDone 回调 ★★★
+      controller.close();
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
         videoInfo.downloadStatus = DownloadStatus.paused;

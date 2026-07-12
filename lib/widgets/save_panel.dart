@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import '../models/video_info.dart';
@@ -158,9 +159,11 @@ class _SavePanelState extends State<SavePanel> {
       final needsTrim = (startSec > 0 || (endSec > 0 && endSec < _durationSec));
 
       if (_isMp3 || needsTrim) {
-        // 需要 FFmpeg 处理
-        // ★ 视频使用 -c copy（快速，不重新编码），失败则兜底
-        // ★ MP3 提取音频
+        // ★ FFmpeg 输出到临时目录（总是可写），再复制到目标路径
+        final tempDir = await getTemporaryDirectory();
+        final tempExt = _isMp3 ? '.mp3' : '.mp4';
+        final tempFilePath = '${tempDir.path}/save_temp_${DateTime.now().millisecondsSinceEpoch}$tempExt';
+
         final cmdBuf = StringBuffer();
         if (startSec > 0) cmdBuf.write('-ss ${_fmtDuration(startSec)} ');
         cmdBuf.write('-i "${widget.filePath}"');
@@ -171,25 +174,30 @@ class _SavePanelState extends State<SavePanel> {
         if (_isMp3) {
           cmdBuf.write(' -vn -acodec libmp3lame -ab 192k');
         } else {
-          // ★ 用 -c copy (不重新编码，快速无质量损失)
           cmdBuf.write(' -c copy -avoid_negative_ts make_zero');
         }
-        cmdBuf.write(' -y "$savePath"');
+        cmdBuf.write(' -y "$tempFilePath"');
 
         developer.log('FFmpeg save: ${cmdBuf.toString()}', name: 'SavePanel');
 
-        final session = await FFmpegKit.execute(cmdBuf.toString());
-        final rc = await session.getReturnCode();
-        if (!ReturnCode.isSuccess(rc)) {
-          // ★ 失败后尝试极简命令（不带额外参数）
-          final simpleCmd = '-i "${widget.filePath}"${_isMp3 ? ' -vn -acodec libmp3lame' : ''} -y "$savePath"';
-          final fbSession = await FFmpegKit.execute(simpleCmd);
-          if (!ReturnCode.isSuccess(await fbSession.getReturnCode())) {
-            throw Exception('处理失败，文件格式可能不兼容');
-          }
+        bool ok = false;
+        var session = await FFmpegKit.execute(cmdBuf.toString());
+        if (ReturnCode.isSuccess(await session.getReturnCode())) {
+          ok = true;
+        } else {
+          // 降级：最简命令
+          final simple = '-i "${widget.filePath}"${_isMp3 ? ' -vn -acodec libmp3lame' : ''} -y "$tempFilePath"';
+          session = await FFmpegKit.execute(simple);
+          if (ReturnCode.isSuccess(await session.getReturnCode())) ok = true;
         }
+
+        if (!ok) throw Exception('处理失败');
+
+        if (!await File(tempFilePath).exists()) throw Exception('临时文件未生成');
+        await File(tempFilePath).copy(savePath);
+        try { await File(tempFilePath).delete(); } catch (_) {}
       } else {
-        // 直接复制
+        // 不剪辑、不转MP3 → 直接复制文件
         await File(widget.filePath).copy(savePath);
       }
 
