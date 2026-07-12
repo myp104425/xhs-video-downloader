@@ -1,5 +1,5 @@
 import 'dart:developer' as developer;
-import 'package:extractor/extractor.dart';
+import 'package:extractor/extractor.dart' as yt;
 import '../../models/video_info.dart';
 import 'parser_base.dart';
 
@@ -13,13 +13,13 @@ class YtDlpParser extends VideoParser {
 
   static const String _tag = 'YtDlpParser';
 
-  static YoutubeDLFlutter? _instance;
+  static yt.YoutubeDLFlutter? _instance;
   static bool _initialized = false;
 
   /// 初始化 extractor（首次调用时自动执行）
   static Future<void> ensureInitialized() async {
     if (_initialized) return;
-    _instance = YoutubeDLFlutter.instance;
+    _instance = yt.YoutubeDLFlutter.instance;
     await _instance!.initialize(enableFFmpeg: false);
     _initialized = true;
     developer.log('extractor 初始化完成', name: _tag);
