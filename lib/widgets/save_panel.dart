@@ -8,6 +8,7 @@ import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import '../models/video_info.dart';
 import '../services/settings_service.dart';
+import '../services/history_service.dart';
 
 /// 保存面板 — 下载完成后显示：试听+剪辑+重命名+保存
 class SavePanel extends StatefulWidget {
@@ -107,10 +108,14 @@ class _SavePanelState extends State<SavePanel> {
     return 0;
   }
 
+  /// 保存的路径（供 SnackBar 打开使用）
+  String? _lastSavedPath;
+
   Future<void> _play() async {
-    if (!File(widget.filePath).existsSync()) return;
+    final path = _lastSavedPath ?? widget.filePath;
+    if (!File(path).existsSync()) return;
     try {
-      await OpenFilex.open(widget.filePath);
+      await OpenFilex.open(path);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -192,6 +197,16 @@ class _SavePanelState extends State<SavePanel> {
       }
 
       if (mounted) {
+        // ★ 记录最后保存的路径，供播放按钮使用
+        _lastSavedPath = savePath;
+
+        // ★ 更新 videoInfo.localPath 指向保存的文件（供下载管理使用）
+        widget.videoInfo.localPath = savePath;
+        widget.videoInfo.downloadTime = DateTime.now();
+        // 持久化到历史记录
+        final history = HistoryService();
+        history.updateRecord(widget.videoInfo);
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('已保存到: ${saveDir.path}'),
@@ -199,7 +214,11 @@ class _SavePanelState extends State<SavePanel> {
             duration: const Duration(seconds: 4),
             action: SnackBarAction(
               label: '打开',
-              onPressed: () => _play(),
+              onPressed: () {
+                try {
+                  OpenFilex.open(savePath);
+                } catch (_) {}
+              },
             ),
           ),
         );
