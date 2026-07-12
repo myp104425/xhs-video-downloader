@@ -32,6 +32,7 @@
         android:requestLegacyExternalStorage="true"
         android:allowBackup="true"
         android:theme="@style/LaunchTheme"
+        android:extractNativeLibs="true"
         tools:targetApi="34"
         tools:overrideLibrary="com.antonkarpenko.ffmpegkit">
 

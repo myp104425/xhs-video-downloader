@@ -5,12 +5,14 @@ import 'screens/download_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/settings_service.dart';
 import 'services/permission_service.dart';
+import 'services/parsers/ytdlp_parser.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SettingsService().init();
-  // 启动时请求存储权限
   await PermissionService.requestStoragePermission();
+  // 预初始化 yt-dlp（加速首次解析）
+  try { await YtDlpParser.ensureInitialized(); } catch (_) {}
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,

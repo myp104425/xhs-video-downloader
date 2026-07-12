@@ -9,17 +9,19 @@ import 'xiaohongshu_parser.dart';
 import 'kuaishou_parser.dart';
 import 'weibo_parser.dart';
 
-/// 解析器管理器 — 多层兜底
+/// 解析器管理器
 ///
-/// 1. 平台专用解析器（小红书/抖音/B站/快手/微博）
-/// 2. 通用嗅探器（扫 HTML 找视频源）
-/// 3. yt-dlp API（Cobalt，仅当平台和嗅探都失败时）
+/// 1. yt-dlp 原生解析（1000+ 网站，离线可用）
+/// 2. 平台专用解析器（小红书/抖音/B站/快手/微博）
+/// 3. 通用嗅探器（扫 HTML 找视频源）
 class ParserManager {
   static const String _tag = 'ParserManager';
 
   static final ParserManager _instance = ParserManager._internal();
   factory ParserManager() => _instance;
   ParserManager._internal();
+
+  final YtDlpParser _ytdlpParser = YtDlpParser();
 
   final List<VideoParser> _platformParsers = [
     XiaohongshuParser(),
@@ -30,7 +32,6 @@ class ParserManager {
   ];
 
   final GenericParser _genericParser = GenericParser();
-  final YtDlpParser _ytdlpParser = YtDlpParser();
 
   Future<ParseResult> parse(String url, {String? cookie}) async {
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -39,7 +40,18 @@ class ParserManager {
 
     final errors = <String>[];
 
-    // 第1层：平台专用解析器
+    // 第1层：yt-dlp 原生解析（覆盖 1000+ 网站）
+    try {
+      developer.log('尝试 yt-dlp 解析', name: _tag);
+      final info = await _ytdlpParser.parse(url, cookie: cookie);
+      if (info.videoUrl.isNotEmpty) {
+        return ParseResult(platform: info.platform, videoInfo: info);
+      }
+    } catch (e) {
+      errors.add('yt-dlp: $e');
+    }
+
+    // 第2层：平台专用解析器
     for (final parser in _platformParsers) {
       if (parser.canParse(url)) {
         try {
@@ -50,12 +62,11 @@ class ParserManager {
           }
         } catch (e) {
           errors.add('${parser.platform.displayName}: $e');
-          developer.log('${parser.platform.displayName} 失败: $e', name: _tag);
         }
       }
     }
 
-    // 第2层：通用嗅探器
+    // 第3层：通用嗅探器
     try {
       developer.log('尝试通用嗅探', name: _tag);
       final info = await _genericParser.parse(url, cookie: cookie);
@@ -64,19 +75,6 @@ class ParserManager {
       }
     } catch (e) {
       errors.add('通用嗅探: $e');
-      developer.log('通用嗅探失败: $e', name: _tag);
-    }
-
-    // 第3层：yt-dlp API 兜底
-    try {
-      developer.log('尝试 yt-dlp API', name: _tag);
-      final info = await _ytdlpParser.parse(url, cookie: cookie);
-      if (info.videoUrl.isNotEmpty) {
-        return ParseResult(platform: info.platform, videoInfo: info);
-      }
-    } catch (e) {
-      errors.add('yt-dlp: $e');
-      developer.log('yt-dlp 失败: $e', name: _tag);
     }
 
     throw Exception('所有解析方式均失败\n'

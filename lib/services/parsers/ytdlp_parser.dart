@@ -1,25 +1,29 @@
-import 'dart:convert';
 import 'dart:developer' as developer;
-import 'package:http/http.dart' as http;
+import 'package:extractor/extractor.dart';
 import '../../models/video_info.dart';
 import 'parser_base.dart';
 
-/// yt-dlp API 解析器 — 使用公开 Cobalt API
+/// yt-dlp 原生解析器 — 使用 youtubedl-android（yt-dlp 编译进 APK）
 ///
-/// 调用 yt-dlp 的公开 REST 服务解析任意网页视频。
-/// 维护说明：如果 API 失效，替换以下 _endpoints 列表中的 URL 即可。
+/// 无需外部 API，不依赖网络服务，覆盖 1000+ 网站。
+/// yt-dlp 社区活跃，平台结构变更后自动适配更新。
 class YtDlpParser extends VideoParser {
   @override
   VideoPlatform get platform => VideoPlatform.unknown;
 
   static const String _tag = 'YtDlpParser';
-  static const Duration _timeout = Duration(seconds: 30);
 
-  // 多个公开 API 端点，依次尝试
-  static const List<String> _endpoints = [
-    'https://cobalt.tools/api/json',
-    'https://api.cobalt.tools/',
-  ];
+  static YoutubeDLFlutter? _instance;
+  static bool _initialized = false;
+
+  /// 初始化 extractor（首次调用时自动执行）
+  static Future<void> ensureInitialized() async {
+    if (_initialized) return;
+    _instance = YoutubeDLFlutter.instance;
+    await _instance!.initialize(enableFFmpeg: false);
+    _initialized = true;
+    developer.log('extractor 初始化完成', name: _tag);
+  }
 
   @override
   bool canParse(String url) {
@@ -28,75 +32,71 @@ class YtDlpParser extends VideoParser {
 
   @override
   Future<VideoInfo> parse(String url, {String? cookie}) async {
-    developer.log('yt-dlp API 解析: $url', name: _tag);
+    developer.log('yt-dlp 解析: $url', name: _tag);
 
-    final errors = <String>[];
+    try {
+      await ensureInitialized();
 
-    for (final endpoint in _endpoints) {
-      try {
-        return await _tryEndpoint(endpoint, url);
-      } catch (e) {
-        errors.add('$endpoint: $e');
-        developer.log('端点 $endpoint 失败: $e', name: _tag);
-      }
-    }
+      // 用 yt-dlp 获取视频信息
+      final info = await _instance!.getVideoInfo(url);
 
-    throw Exception('解析失败\n'
-        '已尝试以下 API 端点均未成功：\n'
-        '${errors.map((e) => '• $e').join('\n')}\n\n'
-        '请稍后重试，或检查链接是否有效');
-  }
+      // 提取视频直链（取最佳画质）
+      String? videoUrl;
+      String? title = info.title;
+      String? author = info.uploader;
+      String? coverUrl = info.thumbnail;
+      final noteId = info.id ?? DateTime.now().millisecondsSinceEpoch.toString();
+      final duration = info.duration ?? 0;
 
-  Future<VideoInfo> _tryEndpoint(String endpoint, String url) async {
-    final resp = await http.post(
-      Uri.parse(endpoint),
-      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-      body: jsonEncode({
-        'url': url,
-        'vCodec': 'h264',
-        'vQuality': '1080',
-        'aFormat': 'mp3',
-        'isAudioOnly': false,
-        'isNoTTWatermark': true,
-      }),
-    ).timeout(_timeout);
-
-    if (resp.statusCode == 200) {
-      final data = jsonDecode(resp.body) as Map;
-
-      // Cobalt v2 响应格式
-      if (data['status'] == 'success' || data['status'] == 'stream') {
-        final videoUrl = data['url']?.toString() ?? data['stream']?.toString() ?? '';
-        final title = data['filename']?.toString() ?? data['title']?.toString() ?? '';
-        if (videoUrl.isNotEmpty) {
-          return VideoInfo(
-            noteId: DateTime.now().millisecondsSinceEpoch.toString(),
-            title: title,
-            author: '',
-            coverUrl: '',
-            videoUrl: videoUrl,
-            sourceUrl: url,
-            platform: VideoPlatform.unknown,
-          );
+      // 从 formats 中找最佳视频 URL
+      final formats = info.formats;
+      if (formats != null && formats.isNotEmpty) {
+        // 优先找带视频+音频的格式
+        for (final fmt in formats) {
+          if (fmt == null) continue;
+          if (fmt.url != null && fmt.url!.isNotEmpty) {
+            final hasVideo = fmt.vcodec != null && fmt.vcodec != 'none';
+            final hasAudio = fmt.acodec != null && fmt.acodec != 'none';
+            if (hasVideo && hasAudio) {
+              videoUrl = fmt.url;
+              developer.log('选取格式: ${fmt.formatId} ${fmt.resolution} ${fmt.ext}', name: _tag);
+              break;
+            }
+          }
+        }
+        // 如果没找到，取第一个有 URL 的格式
+        if (videoUrl == null) {
+          for (final fmt in formats) {
+            if (fmt == null) continue;
+            if (fmt.url != null && fmt.url!.isNotEmpty) {
+              videoUrl = fmt.url;
+              break;
+            }
+          }
         }
       }
 
-      // Cobalt v1 响应格式（兼容）
-      if (data['text'] != null) {
-        final videoUrl = data['text'].toString();
-        if (videoUrl.startsWith('http')) {
-          return VideoInfo(
-            noteId: DateTime.now().millisecondsSinceEpoch.toString(),
-            title: data['filename']?.toString() ?? '',
-            author: '',
-            coverUrl: '',
-            videoUrl: videoUrl,
-            sourceUrl: url,
-            platform: VideoPlatform.unknown,
-          );
-        }
+      // 兜底：用 info.url（可能是原页面地址）
+      videoUrl ??= info.url;
+
+      if (videoUrl == null || videoUrl.isEmpty) {
+        throw Exception('未找到可下载的视频地址');
       }
+
+      return VideoInfo(
+        noteId: noteId,
+        title: title ?? '',
+        author: author ?? '',
+        coverUrl: coverUrl ?? '',
+        videoUrl: videoUrl,
+        sourceUrl: url,
+        duration: duration,
+        platform: VideoPlatform.unknown,
+      );
+    } catch (e) {
+      developer.log('yt-dlp 解析失败: $e', name: _tag);
+      if (e is Exception) rethrow;
+      throw Exception('解析失败: $e');
     }
-    throw Exception('HTTP ${resp.statusCode}');
   }
 }
