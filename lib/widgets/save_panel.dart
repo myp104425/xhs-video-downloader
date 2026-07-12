@@ -1,14 +1,12 @@
 import 'dart:io';
 import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import '../models/video_info.dart';
 import '../services/settings_service.dart';
-import 'package:file_picker/file_picker.dart';
 
 /// 保存面板 — 下载完成后显示：试听+剪辑+重命名+保存
 class SavePanel extends StatefulWidget {
