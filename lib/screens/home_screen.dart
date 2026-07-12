@@ -7,6 +7,7 @@ import '../services/history_service.dart';
 import '../widgets/url_input_bar.dart';
 import '../widgets/platform_badge.dart';
 import '../widgets/save_panel.dart';
+import '../services/permission_service.dart';
 
 /// 首页
 class HomeScreen extends StatefulWidget {
@@ -216,6 +217,9 @@ class _HomeScreenState extends State<HomeScreen>
                 children: [
                   // 头部
                   _buildHeader(theme),
+
+                  // 权限提示（未授权时显示）
+                  _buildPermissionBanner(theme),
 
                   const SizedBox(height: 24),
 
@@ -436,6 +440,51 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
+    );
+  }
+
+  /// 存储权限提示横幅
+  Widget _buildPermissionBanner(ThemeData theme) {
+    return FutureBuilder<bool>(
+      future: PermissionService.isStoragePermissionGranted(),
+      builder: (context, snapshot) {
+        final granted = snapshot.data ?? true;
+        if (granted) return const SizedBox.shrink();
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.errorContainer.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: theme.colorScheme.error.withOpacity(0.2)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.folder_off_outlined, color: theme.colorScheme.error, size: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('需要存储权限',
+                          style: TextStyle(fontWeight: FontWeight.w600, color: theme.colorScheme.error, fontSize: 13)),
+                      const SizedBox(height: 2),
+                      Text('下载的视频将保存到 Download/XHS_Videos',
+                          style: TextStyle(fontSize: 12, color: theme.colorScheme.onErrorContainer)),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => PermissionService.openSettings(),
+                  child: const Text('去授权', style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

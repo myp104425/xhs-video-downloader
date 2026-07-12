@@ -29,13 +29,20 @@ class SettingsService {
           if (await dir.exists() || await dir.create(recursive: true).then((_) => true)) {
             return dir;
           }
-        } catch (_) {
-          // 自定义路径不可写，回退到默认
-        }
+        } catch (_) {}
       }
     }
 
-    // 默认：使用应用内部文档目录（Android / iOS 均可写，无权限问题）
+    // 默认：优先使用 Android Download 目录（用户能在文件管理器看到）
+    final downloadPath = '/storage/emulated/0/Download/XHS_Videos';
+    try {
+      final dir = Directory(downloadPath);
+      if (await dir.exists() || await dir.create(recursive: true).then((_) => true)) {
+        return dir;
+      }
+    } catch (_) {}
+
+    // 备用：应用内部目录（无权限也能写入）
     try {
       final dir = await getApplicationDocumentsDirectory();
       final downloadDir = Directory('${dir.path}/XHS_Videos');

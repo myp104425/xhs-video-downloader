@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -25,6 +24,13 @@ class PermissionService {
       return true;
     }
 
+    return false;
+  }
+
+  /// 检查是否已授予权限（不弹窗）
+  static Future<bool> isStoragePermissionGranted() async {
+    if (await Permission.manageExternalStorage.isGranted) return true;
+    if (await Permission.storage.isGranted) return true;
     return false;
   }
 

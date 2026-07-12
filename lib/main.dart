@@ -8,9 +8,8 @@ import 'services/permission_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // 初始化设置（加载下载路径等）
   await SettingsService().init();
-  // 请求存储权限
+  // 启动时请求存储权限
   await PermissionService.requestStoragePermission();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
